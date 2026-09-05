@@ -240,31 +240,44 @@ SHA-256(canonicalize(R₁)) == SHA-256(canonicalize(R₂))
 
 ---
 
-## 6. Hash Construction
+## 6. Hash Construction & SHA-256 Engine
 
-### 6.1 Record Hash
+### 6.1 Algorithm Specification & Implementation
+
+**Decision:** Use the SHA-256 cryptographic hash function (FIPS 180-4) implemented via Python's standard library `hashlib`.
+
+- **Library:** Python `hashlib` (standard library, zero third-party dependencies, 100% offline).
+- **Module:** `backend/aivara/crypto/hashing.py`.
+- **Digest Size:** 256 bits (32 bytes).
+- **Textual Representation:** Exactly 64 lowercase hexadecimal characters (`[0-9a-f]`).
+- **Input Boundary:** Low-level hashing operates strictly on exact bytes (`bytes`, `bytearray`, `memoryview`) via `sha256_bytes()`. Strings must be explicitly encoded as UTF-8 via `sha256_text()`. Structured data must be canonicalized via `hash_canonical_data()` or `hash_provenance_payload()`.
+
+### 6.2 Record Hash Protected Fields
 
 The record hash provides content identity for a single provenance record.
 
 **Protected fields** (included in hash input):
 
-```
+```json
 {
-    "_schema_version": "1",
-    "record_type": <string>,
-    "project_id": <uuid string>,
-    "actor": <string>,
-    "action": <string>,
-    "target_type": <string | null>,
-    "target_id": <uuid string | null>,
-    "input_hash": <hex string | null>,
-    "output_hash": <hex string | null>,
-    "metadata_json": <canonicalized JSON string>,
-    "sequence_number": <integer>,
-    "nonce": <hex string>,
-    "timestamp": <ISO 8601 UTC string>,
-    "signer_key_id": <hex string>,
-    "previous_record_hash": <hex string | null>
+    "_schema_version": "1.0",
+    "action": "<string>",
+    "actor": "<string>",
+    "config_hash": "<hex string | null>",
+    "input_hash": "<hex string | null>",
+    "metadata_json": {},
+    "model_id": "<string | null>",
+    "model_weight_digest": "<hex string | null>",
+    "nonce": "<hex string>",
+    "output_hash": "<hex string | null>",
+    "previous_record_hash": "<hex string | null>",
+    "project_id": "<uuid string>",
+    "record_type": "<string>",
+    "sequence_number": 1,
+    "signer_key_id": "<hex string>",
+    "target_id": "<uuid string | null>",
+    "target_type": "<string | null>",
+    "timestamp": "2026-09-05T12:00:00Z"
 }
 ```
 
@@ -272,33 +285,61 @@ The record hash provides content identity for a single provenance record.
 
 | Field | Reason |
 |-------|--------|
-| `id` (UUID primary key) | Database-assigned, not part of the logical record |
-| `signature` | The signature signs the hash. Including the signature in the hash would create a circular dependency. |
-| `record_hash` | This IS the output. Cannot be its own input. |
-| `blockchain_tx_id` | Populated asynchronously after record creation |
-| `created_at` (DB column) | Database timestamp, distinct from the cryptographic `timestamp` field |
+| `id` (UUID primary key) | Database-assigned internal surrogate key, not part of the logical record |
+| `signature` | The digital signature signs the hash. Including signature in hash input would create a circular dependency. |
+| `record_hash` | This IS the output digest. Cannot be its own input. |
+| `blockchain_tx_id` | Populated asynchronously after record creation in future phases |
+| `created_at` (DB column) | Database row insertion timestamp, distinct from the cryptographic `timestamp` |
 | `verification_status` | Mutable verification state, not part of the signed content |
 
-### 6.2 Hash Computation Flow
+### 6.3 Hash Computation Flow & Canonicalization Integration
 
 ```
-Protected fields (Python dict)
+Protected Fields (dict)
         │
         ▼
-canonical_bytes = canonicalize(protected_fields)
+canonical_bytes = canonicalize_provenance_payload(...)  # RFC 8785 JCS UTF-8 bytes
         │
         ▼
-record_hash = SHA-256(canonical_bytes).hexdigest()    # 64-char lowercase hex
+record_hash = sha256_bytes(canonical_bytes)            # 64-char lowercase hex
 ```
 
-### 6.3 Hash Representation
+- **Separation of Concerns:** `canonicalize()` is exclusively responsible for canonical serialization. `sha256_bytes()` is exclusively responsible for hashing exact bytes. `hash_provenance_payload()` acts as the clean integration bridge without duplicating JCS logic.
 
-- **Format:** Lowercase hexadecimal string
-- **Length:** 64 characters (256 bits / 4 bits per hex digit)
-- **Example:** `a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90`
-- **Storage:** `VARCHAR(64)` in SQLite
+### 6.4 Representation & Lowercase Policy
 
-### 6.4 Avoiding Circular Hashing
+- **Format:** Lowercase hexadecimal string (`[0-9a-f]`).
+- **Length:** Exactly 64 characters (256 bits).
+- **Prohibitions:** Uppercase hex (e.g. `A1B2...`) and algorithm prefixes (e.g. `sha256:...`) are strictly prohibited in canonical storage.
+- **Empty-Input Vector:** SHA-256 of `b""` is accepted and evaluates to the standard NIST empty digest:
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+### 6.5 Validation & Constant-Time Comparison
+
+- **Validation (`is_valid_sha256`):** Verifies that a digest string is exactly 64 characters and contains exclusively lowercase hex digits.
+- **Secure Comparison (`secure_compare_hashes`):** Uses `hmac.compare_digest` to perform constant-time string comparison, mitigating timing side-channel attacks during record and artifact verification.
+
+### 6.6 Security Properties vs. Limitations
+
+**What SHA-256 Provides:**
+1. **Deterministic Content Digest:** Identical canonical inputs produce bit-for-bit identical hashes across all environments.
+2. **Accidental & Malicious Modification Detection:** The avalanche effect ensures that any single-bit modification produces an unpredictable and uncorrelated 256-bit digest.
+3. **Collision Resistance:** Finding two distinct inputs $x \neq y$ such that $\text{SHA-256}(x) = \text{SHA-256}(y)$ requires an intractable $O(2^{128})$ operations.
+4. **Preimage Resistance:** Infeasible to reverse-engineer input data from the hash digest alone ($O(2^{256})$ work).
+
+**What SHA-256 Does NOT Provide:**
+1. **Authenticity / Non-Repudiation:** A hash alone does NOT prove who authored or created the record (addressed by Ed25519 signatures in Phase 4.5).
+2. **Proof of Benign Content:** Hashing an artifact or model proves only that it matches the digest; it does not prove that the model or data is safe or unbackdoored (ADR-003, ADR-028).
+3. **Replay Protection by Itself:** An attacker can replay a legitimately hashed record unless bound to sequence numbers, nonces, and previous record hashes (Phase 4.4 / Phase 4.6).
+
+### 6.7 Algorithm Agility
+
+While SHA-256 is the standard cryptographic digest for AIVARA (Phase 4), the architecture isolates hashing into `backend/aivara/crypto/hashing.py`. If future post-quantum or enterprise requirements mandate SHA-3, BLAKE3, or SHA-512, migration can be supported cleanly by:
+1. Versioning the canonical schema (`_schema_version = "2.0"`).
+2. Storing algorithm identifiers alongside the chain genesis metadata.
+3. Providing modular hashing adapters within `aivara.crypto`.
+
+### 6.8 Avoiding Circular Hashing
 
 ```
                     ┌──────────────────┐
@@ -312,24 +353,17 @@ record_hash = SHA-256(canonical_bytes).hexdigest()    # 64-char lowercase hex
                     └────────┬─────────┘
                              │
                     ┌────────▼─────────┐
-                    │   SHA-256()       │──────────▶ record_hash
+                    │   sha256_bytes()  │──────────▶ record_hash (64 hex chars)
                     └────────┬─────────┘                │
                              │                          │ stored in DB
                     ┌────────▼─────────┐                │
-                    │  Ed25519.sign()   │                │
+                    │  Ed25519.sign()   │ (Phase 4.5)    │
                     └────────┬─────────┘                │
                              │                          │
-                        signature ──────────────────────┘ both stored
+                        signature ──────────────────────┘ both stored in DB
 ```
 
-**Critical:** The signature signs the `record_hash` bytes, not the canonical payload directly. This means:
-
-1. `record_hash = SHA-256(canonical_bytes(protected_fields))`
-2. `signature = Ed25519.sign(bytes.fromhex(record_hash))`
-
-This avoids re-canonicalizing during verification. The verifier:
-1. Re-canonicalizes the protected fields → recomputes hash → compares to stored `record_hash`
-2. Verifies `Ed25519.verify(signature, bytes.fromhex(record_hash))` with the signer's public key
+The digital signature (Phase 4.5) signs the `record_hash` bytes, avoiding recursive dependencies and eliminating re-canonicalization overhead during signature verification.
 
 ---
 
