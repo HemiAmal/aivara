@@ -1,0 +1,1580 @@
+# AIVARA — Cryptographic Provenance Engine Design Specification
+
+**Phase:** 4.1 — Design Review  
+**Status:** DESIGN REVIEW — Awaiting Approval  
+**Date:** 2026-09-05  
+**Authors:** AIVARA Engineering  
+
+---
+
+## Table of Contents
+
+1. [Purpose](#1-purpose)
+2. [Security Goals](#2-security-goals)
+3. [Threat Model](#3-threat-model)
+4. [Cryptographic Primitives](#4-cryptographic-primitives)
+5. [Canonical Serialization](#5-canonical-serialization)
+6. [Hash Construction](#6-hash-construction)
+7. [Ed25519 Signature Design](#7-ed25519-signature-design)
+8. [Key Management](#8-key-management)
+9. [Nonce Design](#9-nonce-design)
+10. [Sequence Number Design](#10-sequence-number-design)
+11. [Timestamp Design](#11-timestamp-design)
+12. [Provenance Record Structure](#12-provenance-record-structure)
+13. [Hash-Chain Design](#13-hash-chain-design)
+14. [Verification Pipeline](#14-verification-pipeline)
+15. [Replay Detection](#15-replay-detection)
+16. [Failure Behavior](#16-failure-behavior)
+17. [Database Impact](#17-database-impact)
+18. [API Design](#18-api-design)
+19. [Test Strategy](#19-test-strategy)
+20. [Security Limitations](#20-security-limitations)
+21. [Offline / Air-Gapped Considerations](#21-offline--air-gapped-considerations)
+22. [Future Blockchain Integration Considerations](#22-future-blockchain-integration-considerations)
+
+---
+
+## 1. Purpose
+
+This document defines the complete cryptographic design for AIVARA's Provenance Engine (Phase 4). It specifies how every provenance record and inference record is:
+
+- **canonically serialized** to produce deterministic bytes
+- **hashed** to establish content identity
+- **signed** to establish authenticity and non-repudiation
+- **chained** to detect tampering, deletion, insertion, and reordering
+- **protected against replay** via nonces, sequence numbers, and chain binding
+- **verified** through an explicit, deterministic verification pipeline
+
+This is a **design document only**. No code, database migrations, or dependency changes are introduced.
+
+### 1.1 Guiding Principle: Separation of Detection and Proof
+
+> A cryptographic hash proves that an artifact has not been modified relative to the hash. It does **NOT** prove that the artifact is benign, correct, or trustworthy. Hashing provides **identity/integrity**. Detection engines provide **anomaly analysis**. These are complementary, not substitutes (ADR-003, ADR-028).
+
+---
+
+## 2. Security Goals
+
+| ID | Goal | Mechanism |
+|----|------|-----------|
+| SG-01 | **Content integrity** — detect accidental or malicious modification of any provenance-protected field | SHA-256 record hash |
+| SG-02 | **Authenticity** — verify that a record was created by the holder of the signing key | Ed25519 digital signature |
+| SG-03 | **Non-repudiation** — the signer cannot deny having signed a record | Ed25519 asymmetric signature (private key signs, public key verifies) |
+| SG-04 | **Ordering integrity** — detect out-of-order, missing, or inserted records | Monotonic sequence numbers + hash chain |
+| SG-05 | **Tamper evidence** — modification of any record in a chain invalidates all subsequent records | Hash-linked chain (`previous_record_hash`) |
+| SG-06 | **Replay resistance** — prevent resubmission of a previously valid record | Cryptographic nonce + sequence number + chain binding |
+| SG-07 | **Temporal context** — associate records with a point in time | UTC timestamps (supplementary, not sole replay protection) |
+| SG-08 | **Auditability** — enable independent verification of the entire chain | Deterministic canonical serialization + public key verification |
+| SG-09 | **Fail-closed** — security-critical verification failures reject the record | Explicit verification result codes, no silent pass-through |
+| SG-10 | **Offline operation** — all cryptographic operations work without network access | Local key storage, Python `cryptography` library, no external services |
+
+---
+
+## 3. Threat Model
+
+### 3.1 In-Scope Threats (This Design Protects Against)
+
+| ID | Threat | Detection Mechanism |
+|----|--------|---------------------|
+| T-01 | **Accidental modification** — a record's payload is inadvertently altered (bit flip, partial write) | Record hash mismatch |
+| T-02 | **Malicious record modification** — an attacker modifies a stored provenance record | Record hash mismatch + signature verification failure |
+| T-03 | **Artifact substitution** — the `input_hash` or `output_hash` field is replaced to point to a different artifact | Record hash mismatch (hash covers these fields) |
+| T-04 | **Output substitution** — inference output is swapped after sealing | Output hash mismatch within the signed record |
+| T-05 | **Record substitution** — an entire record is replaced with a different valid record | Chain hash mismatch (`previous_record_hash` won't match) |
+| T-06 | **Replay** — a previously valid, legitimately signed record is resubmitted | Nonce uniqueness + sequence number duplicate detection + chain binding |
+| T-07 | **Record deletion** — a record is removed from the chain | Chain verification (gap in sequence, `previous_record_hash` mismatch) |
+| T-08 | **Record insertion** — a spurious record is inserted into the chain | Chain verification (sequence collision, hash chain broken) |
+| T-09 | **Record reordering** — records are reordered in storage | Sequence number + `previous_record_hash` verification |
+| T-10 | **Unauthorized signing** — a record is signed with an unknown or revoked key | Key validity verification (unknown key ID → reject) |
+| T-11 | **Cross-project/cross-chain replay** — a valid record from project A is replayed into project B | Project-scoped chain + genesis nonce anchoring |
+
+### 3.2 Out-of-Scope Threats (Explicit Non-Coverage)
+
+| ID | Threat | Rationale |
+|----|--------|-----------|
+| X-01 | **Compromised host / root access** | An attacker with root access to the workstation can modify the AIVARA binary, database, keys, and memory. No application-level cryptography can protect against this. |
+| X-02 | **Stolen private signing key** | If the private key is extracted, the attacker can produce valid signatures. This design makes key compromise detectable through key rotation and revocation, but cannot prevent signing by a stolen key. |
+| X-03 | **Malicious artifact legitimately signed** | A signing key holder can sign any payload. Signing proves authenticity, not benignity. Detection engines (Layer 1) address content quality. |
+| X-04 | **Compromised operating system** | OS-level attacks (keyloggers, memory dumpers) are outside application scope. |
+| X-05 | **Cryptographic algorithm compromise** | If SHA-256 or Ed25519 are broken, all guarantees are void. Both are currently considered secure by NIST and the wider cryptographic community. |
+| X-06 | **Clock manipulation** | AIVARA trusts the local system clock. An attacker who can manipulate the system clock can forge timestamps. Replay detection does NOT rely solely on timestamps (see §15). |
+| X-07 | **Side-channel attacks** | Timing attacks, power analysis, etc. are out of scope for a software-only desktop application. |
+
+> **Non-overclaim:** This design protects against data-at-rest integrity violations and provides non-repudiation for exported records. It does NOT protect against an attacker with full access to the AIVARA data directory and signing key (see AR-017).
+
+---
+
+## 4. Cryptographic Primitives
+
+### 4.1 Conceptual Distinction
+
+Each primitive serves a distinct, non-substitutable purpose:
+
+| Primitive | Purpose | What It Does NOT Do |
+|-----------|---------|---------------------|
+| **SHA-256 Hash** | Deterministic content identity / integrity checking. Same input → same hash. Any change → different hash. | Does NOT prove authenticity (anyone can compute a hash). Does NOT prove the artifact is benign. |
+| **Ed25519 Signature** | Authenticity and integrity relative to a specific signing key. Proves the signer possessed the private key. | Does NOT prove the content is correct or trustworthy. Only proves who signed it. |
+| **Cryptographic Nonce** | Uniqueness and replay resistance. Ensures each record is unique even if the payload is otherwise identical. | Does NOT provide ordering. Is NOT a substitute for sequence numbers. |
+| **Sequence Number** | Ordering and gap detection. Detects missing, inserted, or out-of-order records. | Does NOT provide uniqueness (a replayed record could reuse a sequence number — the nonce catches this). |
+| **Previous Record Hash** | Creates a tamper-evident hash-linked chain. Modification of any record invalidates all subsequent records. | Does NOT provide replay protection on its own. |
+| **UTC Timestamp** | Temporal context for human review and anomaly detection. | MUST NOT be treated as sufficient replay protection by itself. Clocks can be manipulated. |
+
+### 4.2 Library Selection
+
+| Component | Library | Rationale |
+|-----------|---------|-----------|
+| SHA-256 | `hashlib` (Python stdlib) | No external dependency. FIPS 180-4 compliant. |
+| Ed25519 | `cryptography` (PyCA) | Well-audited, widely used, already available in requirements. Provides `Ed25519PrivateKey` / `Ed25519PublicKey`. |
+| CSPRNG | `os.urandom()` / `secrets` (Python stdlib) | OS-level cryptographically secure random number generator. No external dependency. |
+| JSON canonicalization | Custom implementation following RFC 8785 principles | See §5 for justification. |
+
+### 4.3 Algorithm Parameters
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Hash algorithm | SHA-256 (256-bit / 32 bytes) | Output as 64-character lowercase hex string |
+| Signature algorithm | Ed25519 | 64-byte signature, 32-byte public key, 64-byte private key (seed + public) |
+| Nonce size | 32 bytes (256 bits) | Stored as 64-character lowercase hex string |
+| Signature encoding | Base64 (standard, with padding) | Stored as string in database TEXT column |
+| Public key encoding | Base64 (standard, with padding) | For storage and transmission |
+| Key ID | SHA-256 of the public key bytes, truncated to first 16 hex chars | Provides a short, unique, deterministic identifier |
+
+---
+
+## 5. Canonical Serialization
+
+### 5.1 Problem Statement
+
+The same logical provenance record MUST always produce exactly the same byte sequence regardless of:
+- programming language
+- JSON library implementation
+- dictionary insertion order
+- platform (Windows, Linux, macOS)
+- Python version
+
+Without deterministic serialization, hash(record) produces different values for logically identical records, breaking the entire integrity model.
+
+### 5.2 Approach: RFC 8785 JSON Canonicalization Scheme (JCS) Implementation
+
+**Decision:** Adopt RFC 8785 (JSON Canonicalization Scheme) implemented via the pure-Python `rfc8785` library (pinned to `rfc8785==0.1.4`), wrapped by AIVARA's strict type validation boundary in `backend/aivara/crypto/canonical.py`.
+
+**Justification for `rfc8785` library:**
+
+1. **RFC Author Reference Implementation:** Authored directly by Anders Rundgren (editor of RFC 8785).
+2. **Zero Dependencies & Fully Offline:** Pure Python standard library implementation (`math`, `re`, `typing`, `io`). Requires zero external network access, cloud services, or C/Rust extensions.
+3. **Spec-Compliant Number & Key Ordering:** Implements ECMA 262 §7.1.12.1 floating-point conversion and RFC 8785 §3.2.3 UTF-16 code unit key sorting (including surrogate pair astral characters like U+1F300).
+4. **Auditability & Simplicity:** A concise, audited ~200-line implementation that avoids supply-chain complexity.
+
+### 5.3 Canonical Serialization Rules and Domain Policies
+
+| Aspect | Rule | Implementation & Example |
+|--------|------|-------------------------|
+| **Canonicalization Standard** | RFC 8785 (JSON Canonicalization Scheme - JCS) | `rfc8785.dumps(data)` returning UTF-8 `bytes` |
+| **Object Key Ordering** | Keys sorted lexicographically by UTF-16 code units (RFC 8785 §3.2.3) | `{"a":1,"b":2}` not `{"b":2,"a":1}`; Non-BMP astral characters sort by high surrogate |
+| **Whitespace** | Zero whitespace between tokens. No trailing newline. | `{"a":1,"b":2}` |
+| **String Encoding** | UTF-8. Only escape characters required by RFC 8785 §3.2.2.2: `\"`, `\\`, `\b`, `\f`, `\n`, `\r`, `\t`, and control characters `\u0000`–`\u001f`. No unnecessary unicode escaping. | `"Café"` serialized as UTF-8 bytes, not `"Caf\u00e9"` |
+| **Integer Representation** | Decimal notation with no leading zeros, no `+` prefix, bounded by safe integer range $[-2^{53}+1, 2^{53}-1]$. Exceeding values raise `InvalidNumberError`. | `42` not `42.0` or `+42` |
+| **Floating-Point Policy** | Serialized per ECMA 262 shortest representation. `-0.0` and `0.0` serialized as `0`. Non-finite values (`NaN`, `+Inf`, `-Inf`) raise `InvalidNumberError`. **No arbitrary global rounding (e.g. `round(v, 6)`) is applied by the canonicalizer.** If model inference requires cross-hardware float quantization, it must be performed explicitly by the application layer before canonicalization. | `1.0` -> `1`; `0.5` -> `0.5`; `1e-6` -> `0.000001`; `1e-7` -> `1e-7` |
+| **Datetime Policy** | Raw `datetime` objects are strictly rejected by `canonicalize()` with `UnsupportedTypeError`. All timestamps must be converted to UTC ISO 8601 strings (`YYYY-MM-DDTHH:MM:SSZ`, without fractional seconds) using `format_canonical_datetime()` prior to serialization. | `"2026-09-05T12:00:00Z"` |
+| **Binary Data Policy** | Raw `bytes` or `bytearray` are strictly rejected with `UnsupportedTypeError`. Binary data must be pre-hashed to a SHA-256 hexadecimal string by higher-level cryptographic services. | `input_hash: "a3f8..."` not `image_bytes: b"..."` |
+| **Boolean Representation** | JSON `true` / `false` (lowercase tokens) | `true` / `false` |
+| **Null Representation** | JSON `null`. In provenance payloads, optional fields are explicitly retained as `null` rather than omitted to ensure fixed payload shape across versions. | `{"previous_record_hash":null}` |
+| **Arrays / Lists** | Element order is preserved (array ordering is semantically significant). | `[1,2,3]` != `[3,2,1]` |
+| **Nested Objects** | Recursive application of all canonical rules at every nesting depth. | `{"outer":{"a":1,"b":2}}` |
+| **Schema Version** | Every provenance payload binds an explicit `"_schema_version":"1.0"` field. | `{"_schema_version":"1.0",...}` |
+| **Duplicate Keys** | Disallowed. `parse_canonical_json()` employs an object pairs hook that detects duplicate keys and raises `DuplicateKeyError`. | `{"a":1,"a":2}` rejected |
+| **Input Immutability** | Canonicalization strictly guarantees that the caller's input dictionary or list is never modified or mutated. | Caller data remains identical after call |
+
+### 5.4 Canonicalization Error Hierarchy
+
+All canonicalization exceptions inherit from `aivara.core.exceptions.AivaraException` and standard `ValueError`:
+
+```
+AivaraException
+  └── CanonicalizationError
+        ├── UnsupportedTypeError (code: UNSUPPORTED_TYPE)
+        ├── InvalidNumberError (code: INVALID_NUMBER)
+        ├── InvalidStringError (code: INVALID_STRING)
+        ├── MalformedStructureError (code: MALFORMED_STRUCTURE)
+        ├── InvalidSchemaVersionError (code: INVALID_SCHEMA_VERSION)
+        └── DuplicateKeyError (code: DUPLICATE_KEY)
+```
+
+### 5.5 Canonical Serialization Flow
+
+```
+Structured Data (Python dict / list)
+        │
+        ▼
+[1] Validate input boundary (validate_canonical_data)
+    - Verify only safe JSON types (dict, list, str, int, float, bool, None)
+    - Reject datetime, UUID, bytes, Path, Decimal, custom classes
+    - Check finite numbers (reject NaN, Inf)
+    - Check safe integer domain [-2^53 + 1, 2^53 - 1]
+    - Verify valid UTF-8 string encoding
+        │
+        ▼
+[2] RFC 8785 JCS Serialization (rfc8785.dumps)
+    - Sort object keys by UTF-16 code units
+    - Strip all whitespace between tokens
+    - Serialize floats per ECMA 262 (-0.0 -> 0, 1.0 -> 1)
+    - Apply minimal RFC 8785 string escaping
+        │
+        ▼
+canonical_bytes: bytes (UTF-8 encoded)
+```
+
+### 5.6 Invariant
+
+**For any two logically equivalent provenance records R₁ and R₂:**
+
+```
+canonicalize(R₁) == canonicalize(R₂)
+```
+
+**And in future Phase 4.3:**
+
+```
+SHA-256(canonicalize(R₁)) == SHA-256(canonicalize(R₂))
+```
+
+---
+
+## 6. Hash Construction
+
+### 6.1 Record Hash
+
+The record hash provides content identity for a single provenance record.
+
+**Protected fields** (included in hash input):
+
+```
+{
+    "_schema_version": "1",
+    "record_type": <string>,
+    "project_id": <uuid string>,
+    "actor": <string>,
+    "action": <string>,
+    "target_type": <string | null>,
+    "target_id": <uuid string | null>,
+    "input_hash": <hex string | null>,
+    "output_hash": <hex string | null>,
+    "metadata_json": <canonicalized JSON string>,
+    "sequence_number": <integer>,
+    "nonce": <hex string>,
+    "timestamp": <ISO 8601 UTC string>,
+    "signer_key_id": <hex string>,
+    "previous_record_hash": <hex string | null>
+}
+```
+
+**Fields explicitly EXCLUDED from the hash input:**
+
+| Field | Reason |
+|-------|--------|
+| `id` (UUID primary key) | Database-assigned, not part of the logical record |
+| `signature` | The signature signs the hash. Including the signature in the hash would create a circular dependency. |
+| `record_hash` | This IS the output. Cannot be its own input. |
+| `blockchain_tx_id` | Populated asynchronously after record creation |
+| `created_at` (DB column) | Database timestamp, distinct from the cryptographic `timestamp` field |
+| `verification_status` | Mutable verification state, not part of the signed content |
+
+### 6.2 Hash Computation Flow
+
+```
+Protected fields (Python dict)
+        │
+        ▼
+canonical_bytes = canonicalize(protected_fields)
+        │
+        ▼
+record_hash = SHA-256(canonical_bytes).hexdigest()    # 64-char lowercase hex
+```
+
+### 6.3 Hash Representation
+
+- **Format:** Lowercase hexadecimal string
+- **Length:** 64 characters (256 bits / 4 bits per hex digit)
+- **Example:** `a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90`
+- **Storage:** `VARCHAR(64)` in SQLite
+
+### 6.4 Avoiding Circular Hashing
+
+```
+                    ┌──────────────────┐
+                    │ Protected Fields │
+                    │  (no signature,  │
+                    │   no record_hash)│
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │  canonicalize()   │
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │   SHA-256()       │──────────▶ record_hash
+                    └────────┬─────────┘                │
+                             │                          │ stored in DB
+                    ┌────────▼─────────┐                │
+                    │  Ed25519.sign()   │                │
+                    └────────┬─────────┘                │
+                             │                          │
+                        signature ──────────────────────┘ both stored
+```
+
+**Critical:** The signature signs the `record_hash` bytes, not the canonical payload directly. This means:
+
+1. `record_hash = SHA-256(canonical_bytes(protected_fields))`
+2. `signature = Ed25519.sign(bytes.fromhex(record_hash))`
+
+This avoids re-canonicalizing during verification. The verifier:
+1. Re-canonicalizes the protected fields → recomputes hash → compares to stored `record_hash`
+2. Verifies `Ed25519.verify(signature, bytes.fromhex(record_hash))` with the signer's public key
+
+---
+
+## 7. Ed25519 Signature Design
+
+### 7.1 Signing Process
+
+```python
+# Pseudocode — NOT implementation
+def sign_record(protected_fields: dict, private_key: Ed25519PrivateKey) -> tuple[str, str]:
+    canonical = canonicalize(protected_fields)
+    record_hash = sha256(canonical).hexdigest()
+    signature = private_key.sign(bytes.fromhex(record_hash))
+    signature_b64 = base64.b64encode(signature).decode('ascii')
+    return record_hash, signature_b64
+```
+
+### 7.2 Verification Process
+
+```python
+# Pseudocode — NOT implementation
+def verify_record(record, public_key: Ed25519PublicKey) -> VerificationResult:
+    # Step 1: Reconstruct protected fields from the stored record
+    protected = extract_protected_fields(record)
+    
+    # Step 2: Re-canonicalize and recompute hash
+    canonical = canonicalize(protected)
+    expected_hash = sha256(canonical).hexdigest()
+    
+    # Step 3: Compare with stored hash
+    if expected_hash != record.record_hash:
+        return TAMPERED
+    
+    # Step 4: Verify signature over the hash
+    signature_bytes = base64.b64decode(record.signature)
+    try:
+        public_key.verify(signature_bytes, bytes.fromhex(record.record_hash))
+    except InvalidSignature:
+        return INVALID_SIGNATURE
+    
+    return VALID
+```
+
+### 7.3 Signing Input
+
+The Ed25519 signing input is exactly the **32 raw bytes of the record hash** (decoded from hex), not the hex string. This ensures:
+
+- Consistent input length (always 32 bytes)
+- No encoding ambiguity
+- Ed25519 signs raw bytes, not strings
+
+### 7.4 Signature Encoding
+
+| Aspect | Value |
+|--------|-------|
+| Raw signature | 64 bytes |
+| Storage encoding | Standard Base64 with padding |
+| Storage length | 88 characters |
+| Database column | `TEXT` (existing column type) |
+
+### 7.5 Ed25519 Properties Leveraged
+
+- **Deterministic signatures:** Ed25519 signatures are deterministic (RFC 8032). The same key + same message always produces the same signature. This aids testing and reproducibility.
+- **No per-signature random nonce:** Unlike ECDSA, Ed25519 does not require a random nonce during signing. The nonce is derived deterministically from the private key and message. This eliminates a class of implementation errors.
+- **Fast verification:** Ed25519 verification is ~3x faster than Ed25519 signing, which is ideal since verification happens more frequently.
+
+---
+
+## 8. Key Management
+
+### 8.1 Key Hierarchy
+
+```
+data/
+└── keys/
+    ├── active/
+    │   ├── aivara_signing.key          # Private key (current)
+    │   └── aivara_signing.pub          # Public key (current)
+    ├── revoked/
+    │   ├── <key_id>_<revoked_date>.pub # Archived public keys
+    │   └── ...
+    └── keyring.json                    # Key metadata registry
+```
+
+### 8.2 Key Generation
+
+| Parameter | Value |
+|-----------|-------|
+| Algorithm | Ed25519 |
+| Private key size | 32 bytes (seed) + 32 bytes (public) = 64 bytes total |
+| Public key size | 32 bytes |
+| Key ID | `SHA-256(public_key_bytes)[:16]` — first 16 hex characters |
+| Generation | `Ed25519PrivateKey.generate()` from `cryptography` library |
+| Trigger | First startup if no key exists, or explicit `POST /api/v1/provenance/keys/initialize` |
+
+### 8.3 Key Storage
+
+**Private key file (`aivara_signing.key`):**
+
+| Aspect | Specification |
+|--------|---------------|
+| Format | PEM (PKCS8) |
+| Encryption at rest | **Unencrypted in v1** (single-user desktop). Optional passphrase encryption (PBKDF2 + AES-GCM) in future. |
+| File permissions | `0600` (owner read/write only) on Unix. ACL-restricted on Windows. |
+| Location | `data/keys/active/aivara_signing.key` |
+
+**Public key file (`aivara_signing.pub`):**
+
+| Aspect | Specification |
+|--------|---------------|
+| Format | PEM (SubjectPublicKeyInfo) |
+| Permissions | `0644` (world-readable) |
+| Location | `data/keys/active/aivara_signing.pub` |
+
+### 8.4 Key Metadata Registry (`keyring.json`)
+
+```json
+{
+    "schema_version": "1",
+    "keys": [
+        {
+            "key_id": "a1b2c3d4e5f60718",
+            "algorithm": "Ed25519",
+            "created_at": "2026-09-05T12:00:00Z",
+            "status": "active",
+            "public_key_pem_path": "active/aivara_signing.pub",
+            "public_key_b64": "<base64-encoded raw public key bytes>"
+        }
+    ]
+}
+```
+
+### 8.5 Key Security Rules
+
+| Rule | Enforcement |
+|------|-------------|
+| Private key MUST NOT be hardcoded | Code review, no key material in source |
+| Private key MUST NOT be committed to Git | `.gitignore` entry for `data/keys/` |
+| Private key MUST NOT be stored in database rows | Architecture enforcement — key files only |
+| Private key MUST NOT appear in logs | Logging sanitization filter (already implemented in `core/logging.py`) |
+| Private key MUST NOT appear in API responses | Schema validation — no key material in Pydantic response models |
+| Public key MAY appear in API responses | Included in verification responses for transparency |
+
+### 8.6 Key Rotation
+
+Key rotation creates a new keypair while preserving the old public key for historical verification.
+
+**Rotation process:**
+
+```
+[1] Generate new Ed25519 keypair
+        │
+[2] Assign new key_id = SHA-256(new_public_key)[:16]
+        │
+[3] Move current active key pair to revoked/ directory
+    Rename: <old_key_id>_<revocation_date>.pub
+        │
+[4] Install new keypair in active/ directory
+        │
+[5] Update keyring.json:
+    - Old key: status = "rotated", rotated_at = <now>
+    - New key: status = "active", created_at = <now>
+        │
+[6] Create a provenance record of type "key_rotation"
+    signed with the OLD key, referencing the new key_id
+        │
+[7] Next provenance record is signed with the NEW key
+```
+
+**Key rotation produces a special provenance record:**
+
+```json
+{
+    "record_type": "key_rotation",
+    "action": "rotate_signing_key",
+    "metadata_json": {
+        "old_key_id": "a1b2c3d4e5f60718",
+        "new_key_id": "f8e7d6c5b4a39281",
+        "reason": "scheduled_rotation"
+    }
+}
+```
+
+This record is signed with the **old key**, creating a cryptographic handoff.
+
+### 8.7 Key Revocation
+
+A key can be revoked (e.g., suspected compromise). Revoked keys:
+
+- Are moved to `revoked/` directory
+- Have `status: "revoked"` in `keyring.json`
+- Can still be used for **historical verification** (to verify records signed before revocation)
+- MUST NOT be used for new signatures
+- Revocation produces a provenance record signed with the revoked key (if still available) or with a replacement key
+
+### 8.8 Development vs. Production Key Handling
+
+| Aspect | Development | Production |
+|--------|-------------|------------|
+| Key generation | Auto-generated on first startup | Explicit initialization via API or CLI script |
+| Key encryption | None (unencrypted PEM) | Optional passphrase encryption |
+| Key persistence | Ephemeral (test fixtures use in-memory keys) | File-based with restrictive permissions |
+| Key rotation | Manual | Recommended on a schedule or after personnel change |
+| Key backup | Not required | Offline backup recommended |
+
+---
+
+## 9. Nonce Design
+
+### 9.1 Generation
+
+| Parameter | Value |
+|-----------|-------|
+| Source | `os.urandom(32)` — OS-level CSPRNG |
+| Size | 32 bytes (256 bits) |
+| Representation | Lowercase hexadecimal string (64 characters) |
+| Storage | `VARCHAR(64)` column |
+
+### 9.2 Uniqueness Scope
+
+**Decision:** Nonce uniqueness is enforced **per-project** (project-scoped).
+
+**Justification:**
+
+| Scope | Pros | Cons | Decision |
+|-------|------|------|----------|
+| Global | Maximum protection | Requires cross-project index; overhead for large multi-project deployments | Rejected — unnecessary given chain binding |
+| Per-project | Matches chain scope; practical index size; sufficient given that chains are project-scoped | A nonce could technically repeat across projects | **Selected** |
+| Per-signer | Allows nonce reuse across signers within a project | Insufficient — doesn't prevent cross-signer replay within a project | Rejected |
+| Per-chain | Equivalent to per-project in current design | — | Equivalent to selected |
+
+### 9.3 Uniqueness Checking
+
+Before a new provenance record is committed:
+
+1. Generate nonce via `os.urandom(32).hex()`
+2. Query: `SELECT 1 FROM provenance_records WHERE project_id = ? AND nonce = ?`
+3. If a match is found → **regenerate** (this is astronomically unlikely with 256-bit nonces, but the check is a defense-in-depth measure)
+4. If no match → proceed
+
+### 9.4 Behavior After Restart
+
+Nonces are stored persistently in the database. After a restart:
+
+- The nonce uniqueness table is already populated
+- New nonces are generated independently of any prior state
+- `os.urandom()` does not depend on application state — it draws from the OS entropy pool
+
+### 9.5 Nonce vs. Sequence Number
+
+| Property | Nonce | Sequence Number |
+|----------|-------|-----------------|
+| Purpose | Uniqueness / replay resistance | Ordering / gap detection |
+| Generation | Random (CSPRNG) | Deterministic (increment) |
+| Predictable | No | Yes (by design) |
+| Detects replay | Yes (duplicate nonce check) | Partially (duplicate sequence check) |
+| Detects gaps | No | Yes |
+| Detects reorder | No | Yes |
+
+Both are required. Neither alone is sufficient.
+
+---
+
+## 10. Sequence Number Design
+
+### 10.1 Scope
+
+**Decision:** Sequence numbers are scoped **per-project** for provenance records.
+
+For inference records, the existing schema scopes sequence numbers per `(project_id, model_id)` pair (as defined by the unique index `ix_inference_records_sequence`). This is retained.
+
+| Chain Type | Sequence Scope | Rationale |
+|------------|---------------|-----------|
+| Provenance records | Per `project_id` | One provenance chain per project |
+| Inference records | Per `(project_id, model_id)` | One inference chain per model within a project |
+
+### 10.2 Rules
+
+| Rule | Specification |
+|------|---------------|
+| Starting value | `1` (genesis record has `sequence_number = 1`) |
+| Increment | Strictly `+1` per record |
+| Type | Non-negative integer |
+| Maximum | No artificial limit (SQLite INTEGER is 64-bit) |
+| Persistence | Derived from `MAX(sequence_number) + 1` at record creation time |
+| Concurrency | SQLite single-writer mode (WAL) ensures serialized writes. Sequence assignment is atomic within a transaction. |
+| Restart behavior | Sequence continues from the last persisted value. No reset on restart. |
+
+### 10.3 Gap and Duplicate Handling
+
+| Condition | Meaning | Verification Result |
+|-----------|---------|---------------------|
+| Sequence `[1, 2, 3, 4, 5]` | Valid | `VALID` |
+| Sequence `[1, 2, 4, 5]` | Gap — record 3 is missing (deleted or never written) | `CHAIN_BROKEN` |
+| Sequence `[1, 2, 3, 3, 4]` | Duplicate — record 3 appears twice | `SEQUENCE_VIOLATION` |
+| Sequence `[1, 2, 4, 3, 5]` | Out-of-order — records 3 and 4 are swapped | `CHAIN_BROKEN` (previous_hash also fails) |
+
+### 10.4 Interaction with Other Fields
+
+```
+sequence_number: provides ordering, detects gaps
+         +
+nonce: provides uniqueness, detects replay
+         +
+previous_record_hash: provides chaining, detects tampering
+         +
+timestamp: provides temporal context (supplementary)
+         =
+Full provenance integrity
+```
+
+---
+
+## 11. Timestamp Design
+
+### 11.1 Format
+
+| Parameter | Value |
+|-----------|-------|
+| Timezone | UTC only |
+| Format | ISO 8601: `YYYY-MM-DDTHH:MM:SSZ` |
+| Fractional seconds | None (truncated to whole seconds) |
+| Suffix | `Z` (explicit UTC indicator, not `+00:00`) |
+| Storage | `VARCHAR(20)` or `DATETIME` column (existing `DATETIME`) |
+
+### 11.2 Clock Source
+
+The timestamp is derived from the local system clock via `datetime.now(timezone.utc)`.
+
+**Documented assumption:** AIVARA trusts the local system clock. In air-gapped environments, the clock may not be NTP-synchronized. This is a known limitation (see §20).
+
+### 11.3 Timestamp as Supplementary Evidence
+
+Timestamps are included in the canonical payload and protected by the hash. However:
+
+> **Timestamps MUST NOT be the sole replay detection mechanism.**
+> 
+> Primary replay detection: nonce uniqueness + sequence number + chain binding.
+> Timestamps: supplementary evidence for human review and anomaly detection.
+
+### 11.4 Clock Anomaly Detection
+
+During chain verification, if `record[N].timestamp < record[N-1].timestamp`, this is flagged as a warning (not an automatic rejection):
+
+```
+CLOCK_ANOMALY_WARNING: Record {N} timestamp is before record {N-1} timestamp.
+This may indicate clock manipulation or clock skew. Manual review recommended.
+```
+
+This is a **warning**, not a verification failure, because clock skew can occur legitimately in some environments.
+
+---
+
+## 12. Provenance Record Structure
+
+### 12.1 Complete Record Structure
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      ProvenanceRecord                            │
+├─────────────────────────────────────────────────────────────────┤
+│ Database fields (not in hash):                                   │
+│   id: UUID                    ← DB primary key                   │
+│   created_at: datetime        ← DB insertion timestamp           │
+│   verification_status: str    ← mutable verification state       │
+│   blockchain_tx_id: str|null  ← future blockchain reference      │
+├─────────────────────────────────────────────────────────────────┤
+│ Protected fields (included in hash):                             │
+│   _schema_version: "1"       ← canonical schema version         │
+│   record_type: str           ← category of provenance event     │
+│   project_id: UUID str       ← project scope                    │
+│   actor: str                 ← who performed the action          │
+│   action: str                ← what was done                     │
+│   target_type: str|null      ← type of affected entity           │
+│   target_id: UUID str|null   ← ID of affected entity             │
+│   input_hash: hex str|null   ← SHA-256 of inputs                 │
+│   output_hash: hex str|null  ← SHA-256 of outputs                │
+│   metadata_json: str         ← canonicalized metadata            │
+│   sequence_number: int       ← monotonic ordering                │
+│   nonce: hex str             ← cryptographic nonce               │
+│   timestamp: ISO 8601 str    ← UTC timestamp                     │
+│   signer_key_id: hex str     ← identifies the signing key        │
+│   previous_record_hash: hex str|null ← chain link                │
+├─────────────────────────────────────────────────────────────────┤
+│ Computed fields:                                                 │
+│   record_hash: hex str       ← SHA-256(canonical(protected))     │
+│   signature: base64 str      ← Ed25519.sign(record_hash_bytes)   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 12.2 Record Creation Flow
+
+```
+                    ┌──────────────────┐
+                    │  Application     │
+                    │  provides:       │
+                    │  - record_type   │
+                    │  - actor, action │
+                    │  - target info   │
+                    │  - input/output  │
+                    │  - metadata      │
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │ Assign:          │
+                    │ - sequence_number│ ← MAX(seq) + 1
+                    │ - nonce          │ ← os.urandom(32).hex()
+                    │ - timestamp      │ ← UTC now
+                    │ - signer_key_id  │ ← active key ID
+                    │ - previous_hash  │ ← last record's hash
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │ canonicalize()    │
+                    │ → canonical_bytes │
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │ SHA-256()         │
+                    │ → record_hash     │
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │ Ed25519.sign()    │
+                    │ → signature       │
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │ INSERT into DB    │
+                    │ (atomic txn)      │
+                    └──────────────────┘
+```
+
+---
+
+## 13. Hash-Chain Design
+
+### 13.1 Chain Structure
+
+```
+┌────────────────────┐     ┌────────────────────┐     ┌────────────────────┐
+│   Record 1         │     │   Record 2         │     │   Record 3         │
+│   (Genesis)        │     │                    │     │                    │
+│                    │     │                    │     │                    │
+│ prev_hash: <gen>   │◄────│ prev_hash: hash_1  │◄────│ prev_hash: hash_2  │
+│ seq: 1             │     │ seq: 2             │     │ seq: 3             │
+│ nonce: <random>    │     │ nonce: <random>    │     │ nonce: <random>    │
+│ record_hash: hash_1│     │ record_hash: hash_2│     │ record_hash: hash_3│
+│ signature: sig_1   │     │ signature: sig_2   │     │ signature: sig_3   │
+└────────────────────┘     └────────────────────┘     └────────────────────┘
+```
+
+### 13.2 Genesis Record
+
+The first record in a project's provenance chain is the **genesis record**.
+
+**Genesis `previous_record_hash` construction (per ADR-011 Amendment / AR-015):**
+
+```
+genesis_nonce = os.urandom(32).hex()    # Generated at project creation
+Store genesis_nonce in Project.genesis_nonce column
+
+previous_record_hash for genesis = SHA-256(project_id + genesis_nonce).hexdigest()
+```
+
+The genesis nonce is stored in the `Project` table (column `genesis_nonce`, already present), separate from the provenance chain. This anchors the chain to the project. Replacing the chain requires modifying both the provenance records AND the project record.
+
+### 13.3 Chain Scope
+
+One provenance chain per project. All provenance records for a project form a single linear chain ordered by `sequence_number`.
+
+### 13.4 Chain Identity
+
+The chain is identified by:
+- `project_id` — which project
+- `genesis_nonce` — the anchor stored in the Project table
+- The genesis record's `previous_record_hash = SHA-256(project_id + genesis_nonce)`
+
+### 13.5 Signer Changes Within a Chain
+
+When a key rotation occurs (§8.6):
+1. A `key_rotation` provenance record is signed with the **old** key
+2. Subsequent records are signed with the **new** key
+3. Chain verification looks up the correct public key for each record using `signer_key_id`
+
+The chain remains valid across key rotations because:
+- The hash chain is independent of the signing key (hashes don't change with key rotation)
+- Each record's `signer_key_id` identifies which key to use for signature verification
+- The key rotation record itself provides the cryptographic handoff
+
+### 13.6 Chain Verification
+
+Full chain verification algorithm:
+
+```
+function verify_chain(project_id):
+    records = get_all_records(project_id, order_by=sequence_number ASC)
+    
+    if records is empty:
+        return CHAIN_EMPTY
+    
+    # Verify genesis
+    project = get_project(project_id)
+    expected_genesis_prev = SHA-256(project_id + project.genesis_nonce)
+    
+    if records[0].previous_record_hash != expected_genesis_prev:
+        return CHAIN_BROKEN (genesis anchor mismatch)
+    
+    if records[0].sequence_number != 1:
+        return SEQUENCE_VIOLATION (genesis must be sequence 1)
+    
+    seen_nonces = set()
+    
+    for i, record in enumerate(records):
+        # 1. Verify sequence
+        if record.sequence_number != i + 1:
+            return SEQUENCE_VIOLATION
+        
+        # 2. Verify record hash
+        protected = extract_protected_fields(record)
+        expected_hash = SHA-256(canonicalize(protected))
+        if expected_hash != record.record_hash:
+            return TAMPERED (record {i+1})
+        
+        # 3. Verify signature
+        public_key = lookup_key(record.signer_key_id)
+        if public_key is None:
+            return UNKNOWN_KEY
+        if not verify_signature(public_key, record.record_hash, record.signature):
+            return INVALID_SIGNATURE (record {i+1})
+        
+        # 4. Verify chain link (for non-genesis records)
+        if i > 0:
+            if record.previous_record_hash != records[i-1].record_hash:
+                return CHAIN_BROKEN (record {i+1})
+        
+        # 5. Verify nonce uniqueness
+        if record.nonce in seen_nonces:
+            return REPLAY_DETECTED (duplicate nonce)
+        seen_nonces.add(record.nonce)
+        
+        # 6. Timestamp monotonicity (warning, not failure)
+        if i > 0 and record.timestamp < records[i-1].timestamp:
+            add_warning(CLOCK_ANOMALY)
+    
+    return VALID
+```
+
+### 13.7 Tamper Scenarios and Detection
+
+| Scenario | Detection Mechanism | Result |
+|----------|---------------------|--------|
+| **Middle record modified** | Record hash recomputation fails; all subsequent `previous_record_hash` links break | `TAMPERED` at modified record, `CHAIN_BROKEN` at next record |
+| **Record deleted** | Sequence gap (e.g., 1,2,4,5); `previous_record_hash` of the record after the gap doesn't match the record before it | `CHAIN_BROKEN` |
+| **Record inserted** | Sequence collision (duplicate sequence number) OR chain links broken | `SEQUENCE_VIOLATION` or `CHAIN_BROKEN` |
+| **Records reordered** | `previous_record_hash` doesn't match the preceding record's hash; sequence is non-monotonic | `CHAIN_BROKEN` |
+| **Old valid record replayed** | Nonce already exists in the chain; sequence number already used | `REPLAY_DETECTED` or `SEQUENCE_VIOLATION` |
+| **Record from another project substituted** | `project_id` in the record doesn't match the chain's project; genesis anchor mismatch | `CHAIN_BROKEN` (previous_hash won't match) |
+
+---
+
+## 14. Verification Pipeline
+
+### 14.1 Verification Stages
+
+The verification pipeline is an ordered sequence of deterministic checks. Each stage produces a pass/fail result. The pipeline **stops at the first failure** (fail-fast) and returns the corresponding result code.
+
+```
+┌─────────────────────────────────────────────────────┐
+│              VERIFICATION PIPELINE                   │
+│                                                     │
+│  [1] Schema Validation                              │
+│       └─ Are all required fields present and typed? │
+│                     │                               │
+│  [2] Key Validity                                   │
+│       └─ Is signer_key_id known and not revoked?    │
+│                     │                               │
+│  [3] Record Hash Verification                       │
+│       └─ Re-canonicalize → re-hash → compare        │
+│                     │                               │
+│  [4] Signature Verification                         │
+│       └─ Ed25519.verify(sig, hash, pubkey)          │
+│                     │                               │
+│  [5] Nonce Uniqueness                               │
+│       └─ Is this nonce unique within the project?   │
+│                     │                               │
+│  [6] Sequence Verification                          │
+│       └─ Is sequence_number = expected?             │
+│                     │                               │
+│  [7] Previous Hash Verification                     │
+│       └─ Does previous_record_hash match prior?     │
+│                     │                               │
+│  [8] Timestamp Plausibility (warning only)          │
+│       └─ Is timestamp >= previous timestamp?        │
+│                     │                               │
+│  [9] Result                                         │
+│       └─ VALID / failure code                       │
+└─────────────────────────────────────────────────────┘
+```
+
+### 14.2 Verification Result Codes
+
+These codes align with the existing `FindingType` enum patterns in the codebase (e.g., `CHAIN_BREAK`, `REPLAY_DETECTED`, `SEAL_INVALID`):
+
+| Code | Meaning | Severity | Fail-Closed |
+|------|---------|----------|-------------|
+| `VALID` | All checks pass | — | N/A |
+| `INVALID_SCHEMA` | Record is missing required fields or has invalid types | CRITICAL | Yes |
+| `UNKNOWN_KEY` | `signer_key_id` not found in keyring | CRITICAL | Yes |
+| `REVOKED_KEY` | Signing key has been revoked (acceptable for historical records before revocation date) | HIGH | Contextual |
+| `TAMPERED` | Record hash does not match recomputed hash from protected fields | CRITICAL | Yes |
+| `INVALID_SIGNATURE` | Ed25519 signature verification failed | CRITICAL | Yes |
+| `REPLAY_DETECTED` | Nonce reuse or duplicate record detected | CRITICAL | Yes |
+| `SEQUENCE_VIOLATION` | Sequence number gap, duplicate, or out-of-order | HIGH | Yes |
+| `CHAIN_BROKEN` | `previous_record_hash` does not match prior record's `record_hash` | CRITICAL | Yes |
+| `CLOCK_ANOMALY` | Timestamp is before previous record's timestamp | MEDIUM | No (warning) |
+
+### 14.3 Single Record vs. Chain Verification
+
+| Mode | Scope | Use Case |
+|------|-------|----------|
+| **Single record** | Stages 1–4 (schema, key, hash, signature) | Quick validation of one record |
+| **Chain verification** | Stages 1–8 for every record in the chain | Full integrity audit of the entire provenance history |
+| **Incremental verification** | Chain verification from last verified checkpoint | Efficient re-verification after new records are added |
+
+---
+
+## 15. Replay Detection
+
+### 15.1 Definition of Replay
+
+A **replay** occurs when a previously valid, legitimately signed record is resubmitted to the system. The record's signature is valid, its hash is correct — but it is being presented out of its original context.
+
+### 15.2 Replay Vectors and Defenses
+
+| Vector | Defense | Detection |
+|--------|---------|-----------|
+| **Exact record resubmission** | Nonce uniqueness check | `SELECT 1 FROM provenance_records WHERE project_id = ? AND nonce = ?` |
+| **Valid old signed record** | Sequence number check (already used) + chain binding (previous_hash won't match current chain head) | `SEQUENCE_VIOLATION` or `CHAIN_BROKEN` |
+| **Reused nonce** | Nonce uniqueness check | `REPLAY_DETECTED` |
+| **Duplicate record hash** | Record hash uniqueness is implied by nonce uniqueness (different nonces → different hashes) | Covered by nonce check |
+| **Old timestamp** | Timestamp monotonicity warning | `CLOCK_ANOMALY` (supplementary) |
+| **Cross-project replay** | `project_id` is part of the hashed payload; `previous_record_hash` won't match target chain | `CHAIN_BROKEN` |
+| **Cross-chain replay (different chain within same project)** | Not applicable — one chain per project | N/A |
+
+### 15.3 Replay Detection is Multi-Layered
+
+No single mechanism is sufficient. The defense-in-depth approach:
+
+```
+Layer 1: Nonce uniqueness      ← catches exact replays
+Layer 2: Sequence number       ← catches replays with reused sequence  
+Layer 3: Chain binding         ← catches replays into wrong position
+Layer 4: Timestamp warning     ← flags temporal anomalies for human review
+```
+
+### 15.4 Why Timestamps Alone Are Insufficient
+
+An attacker who can manipulate the system clock (or an environment where the clock is not synchronized) can craft records with any timestamp. Therefore:
+
+- Timestamp checks produce **warnings**, not **rejections**
+- The primary replay protection is the nonce + sequence + chain binding triad
+- Timestamps provide value for human review and anomaly detection
+
+---
+
+## 16. Failure Behavior
+
+### 16.1 Fail-Closed Principle
+
+For all security-critical verification failures, the system **fails closed**: the record is rejected, the failure is logged, and a proof-layer finding is generated.
+
+### 16.2 Failure Matrix
+
+| Failure Condition | Result Code | Action | Creates Finding |
+|-------------------|-------------|--------|-----------------|
+| Corrupted record (unparseable) | `INVALID_SCHEMA` | Reject | Yes — `RECORD_MODIFICATION` |
+| Wrong signature | `INVALID_SIGNATURE` | Reject | Yes — `SEAL_INVALID` |
+| Wrong public key | `UNKNOWN_KEY` | Reject | Yes — `SEAL_INVALID` |
+| Changed payload (any protected field) | `TAMPERED` | Reject | Yes — `RECORD_MODIFICATION` |
+| Changed model hash | `TAMPERED` | Reject | Yes — `RECORD_MODIFICATION` |
+| Changed input hash | `TAMPERED` | Reject | Yes — `INPUT_SUBSTITUTION` |
+| Changed output | `TAMPERED` | Reject | Yes — `OUTPUT_TAMPERING` |
+| Changed timestamp | `TAMPERED` | Reject | Yes — `RECORD_MODIFICATION` |
+| Changed nonce | `TAMPERED` | Reject | Yes — `RECORD_MODIFICATION` |
+| Changed sequence number | `TAMPERED` | Reject | Yes — `RECORD_MODIFICATION` |
+| Changed previous_record_hash | `TAMPERED` | Reject | Yes — `RECORD_MODIFICATION` |
+| Deleted record | `CHAIN_BROKEN` | Reject chain | Yes — `CHAIN_BREAK` |
+| Inserted record | `CHAIN_BROKEN` or `SEQUENCE_VIOLATION` | Reject chain | Yes — `CHAIN_BREAK` |
+| Reordered records | `CHAIN_BROKEN` | Reject chain | Yes — `CHAIN_BREAK` |
+| Duplicate record | `REPLAY_DETECTED` | Reject | Yes — `REPLAY_DETECTED` |
+| Reused nonce | `REPLAY_DETECTED` | Reject | Yes — `REPLAY_DETECTED` |
+| Replay from another chain | `CHAIN_BROKEN` | Reject | Yes — `REPLAY_DETECTED` |
+| Unknown key | `UNKNOWN_KEY` | Reject | Yes — `SEAL_INVALID` |
+| Revoked key (historical) | `REVOKED_KEY` | Warning (if before revocation date) | Conditional |
+| Missing signing key file | Signing error | Abort operation, log error | Yes — audit event |
+
+### 16.3 Finding Generation
+
+When verification fails, the system generates a **proof-layer finding** (per ADR-028):
+
+```python
+Finding(
+    evidence_layer="proof",
+    confidence=1.0,              # Proof-layer findings are deterministic
+    severity="critical",         # Security violations are critical
+    finding_type="<type>",       # e.g., RECORD_MODIFICATION, CHAIN_BREAK
+    disposition="quarantine",    # Fail-closed: quarantine the affected scope
+)
+```
+
+---
+
+## 17. Database Impact
+
+### 17.1 Existing Schema Analysis
+
+The existing `ProvenanceRecordModel` and `InferenceRecordModel` already contain most required fields. The following analysis identifies gaps.
+
+### 17.2 `provenance_records` Table — Required Changes
+
+| Field | Current State | Required State | Change Needed |
+|-------|---------------|----------------|---------------|
+| `id` | VARCHAR(36) PK | No change | None |
+| `project_id` | FK → projects.id | No change | None |
+| `record_type` | VARCHAR(100) NOT NULL | No change | None |
+| `actor` | VARCHAR(255) DEFAULT 'system' | No change | None |
+| `action` | VARCHAR(100) NOT NULL | No change | None |
+| `target_type` | VARCHAR(50) NULLABLE | No change | None |
+| `target_id` | VARCHAR(36) NULLABLE | No change | None |
+| `input_hash` | VARCHAR(64) NULLABLE | No change | None |
+| `output_hash` | VARCHAR(64) NULLABLE | No change | None |
+| `metadata_json` | JSON NOT NULL | No change | None |
+| `signature` | TEXT NULLABLE | No change (will store base64 Ed25519) | None |
+| `previous_record_hash` | VARCHAR(64) NULLABLE | No change | None |
+| `record_hash` | VARCHAR(64) NULLABLE | No change | None |
+| `sequence_number` | INTEGER NULLABLE | **Change: make NOT NULL** for signed records | **ALTER** |
+| `blockchain_tx_id` | VARCHAR(128) NULLABLE | No change | None |
+| `created_at` | DATETIME NOT NULL | No change | None |
+| **`nonce`** | Missing | VARCHAR(64) NULLABLE | **ADD COLUMN** |
+| **`timestamp`** | Missing (distinct from `created_at`) | VARCHAR(24) NOT NULL | **ADD COLUMN** |
+| **`signer_key_id`** | Missing | VARCHAR(16) NULLABLE | **ADD COLUMN** |
+| **`verification_status`** | Missing | VARCHAR(50) NOT NULL DEFAULT 'unverified' | **ADD COLUMN** |
+
+### 17.3 New Columns — Detailed Specification
+
+#### `nonce`
+
+| Property | Value |
+|----------|-------|
+| Purpose | Cryptographic nonce for replay resistance |
+| Type | `VARCHAR(64)` |
+| Nullable | Yes (null for pre-Phase-4 records) |
+| Unique | Yes, within project scope |
+| Index | `ix_provenance_records_nonce` UNIQUE on `(project_id, nonce)` |
+
+#### `timestamp`
+
+| Property | Value |
+|----------|-------|
+| Purpose | Cryptographic timestamp (distinct from DB `created_at`) — included in hash |
+| Type | `VARCHAR(24)` |
+| Nullable | Yes (null for pre-Phase-4 records) |
+| Index | None (covered by sequence_number for ordering) |
+
+#### `signer_key_id`
+
+| Property | Value |
+|----------|-------|
+| Purpose | Identifies which signing key was used |
+| Type | `VARCHAR(16)` |
+| Nullable | Yes (null for pre-Phase-4 records) |
+| Index | `ix_provenance_records_signer_key_id` on `(signer_key_id)` |
+
+#### `verification_status`
+
+| Property | Value |
+|----------|-------|
+| Purpose | Tracks the verification state of this record |
+| Type | `VARCHAR(50)` |
+| Nullable | No |
+| Default | `'unverified'` |
+| Values | `unverified`, `valid`, `invalid`, `tampered`, `replay` |
+
+### 17.4 `inference_records` Table — Required Changes
+
+The inference record model already contains `nonce`, `signature`, `sequence_number`, `previous_record_hash`, `record_hash`, and `verification_status`. Required additions:
+
+| Field | Current State | Required State | Change Needed |
+|-------|---------------|----------------|---------------|
+| **`timestamp`** | Missing (uses `created_at`) | VARCHAR(24) NULLABLE | **ADD COLUMN** |
+| **`signer_key_id`** | Missing | VARCHAR(16) NULLABLE | **ADD COLUMN** |
+
+### 17.5 `projects` Table — No Changes
+
+The `genesis_nonce` column (`VARCHAR(64)`, nullable) already exists. It will be populated at project creation or via explicit initialization.
+
+### 17.6 New Indexes
+
+| Index Name | Table | Columns | Unique | Purpose |
+|------------|-------|---------|--------|---------|
+| `ix_provenance_records_nonce` | `provenance_records` | `(project_id, nonce)` | Yes | Nonce uniqueness enforcement |
+| `ix_provenance_records_signer_key_id` | `provenance_records` | `(signer_key_id)` | No | Key-based record lookup |
+| `ix_provenance_records_record_hash` | `provenance_records` | `(record_hash)` | No | Hash-based record lookup |
+
+### 17.7 Migration Strategy
+
+All schema changes will be applied via Alembic migration (ADR-018). The migration:
+
+1. Adds new columns as NULLABLE (backward-compatible)
+2. Adds new indexes
+3. Does NOT modify existing data
+4. Pre-Phase-4 records retain NULL values for new fields
+5. Downgrade path: drops the new columns and indexes
+
+---
+
+## 18. API Design
+
+### 18.1 API Conventions
+
+All endpoints follow the existing AIVARA conventions:
+
+- Prefix: `/api/v1/`
+- Response envelope: `ApiResponse[T]` / `ApiErrorResponse`
+- Versioning: URL path prefix
+- Binding: `127.0.0.1` only (localhost)
+
+### 18.2 Proposed Endpoints
+
+#### Key Management
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/provenance/keys/initialize` | Generate initial signing keypair (idempotent — no-op if key exists) |
+| `GET` | `/api/v1/provenance/keys/active` | Get active public key info (key_id, algorithm, created_at). **Never returns private key.** |
+| `POST` | `/api/v1/provenance/keys/rotate` | Rotate to a new signing key |
+| `GET` | `/api/v1/provenance/keys` | List all keys (active + rotated + revoked) with status |
+
+#### Provenance Record Operations
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/provenance/records` | Create and sign a new provenance record |
+| `GET` | `/api/v1/provenance/records/{id}` | Get a single provenance record |
+| `POST` | `/api/v1/provenance/records/{id}/verify` | Verify a single record (hash + signature) |
+
+#### Chain Operations
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/provenance/chain/{project_id}` | Get provenance chain for a project (paginated) |
+| `POST` | `/api/v1/provenance/chain/{project_id}/verify` | Verify entire chain (returns verification result) |
+| `GET` | `/api/v1/provenance/chain/{project_id}/status` | Get chain verification status |
+
+### 18.3 Request/Response Schemas (Conceptual)
+
+**Create provenance record request:**
+
+```json
+{
+    "project_id": "uuid",
+    "record_type": "dataset_import",
+    "action": "ingest",
+    "target_type": "dataset",
+    "target_id": "uuid",
+    "input_hash": "sha256hex",
+    "output_hash": "sha256hex",
+    "metadata_json": {}
+}
+```
+
+**Create provenance record response:**
+
+```json
+{
+    "status": "success",
+    "data": {
+        "id": "uuid",
+        "project_id": "uuid",
+        "record_type": "dataset_import",
+        "sequence_number": 5,
+        "nonce": "hex64",
+        "timestamp": "2026-09-05T12:00:00Z",
+        "record_hash": "sha256hex",
+        "signer_key_id": "a1b2c3d4e5f60718",
+        "previous_record_hash": "sha256hex",
+        "signature": "base64"
+    },
+    "meta": { "..." : "..." }
+}
+```
+
+**Verification response:**
+
+```json
+{
+    "status": "success",
+    "data": {
+        "result": "VALID",
+        "records_verified": 42,
+        "warnings": [
+            {
+                "code": "CLOCK_ANOMALY",
+                "record_sequence": 17,
+                "message": "Timestamp before previous record"
+            }
+        ],
+        "verified_at": "2026-09-05T12:00:00Z"
+    },
+    "meta": { "..." : "..." }
+}
+```
+
+---
+
+## 19. Test Strategy
+
+### 19.1 Test Categories
+
+All tests must run offline, without external services, GPU, or network access.
+
+### 19.2 Canonicalization Tests
+
+| Test | Assertion |
+|------|-----------|
+| Same logical record → same bytes | `canonical(R) == canonical(R')` where R and R' have identical logical content |
+| Reordered object keys → same bytes | `canonical({"b":2,"a":1}) == canonical({"a":1,"b":2})` |
+| Modified value → different bytes | `canonical({"a":1}) != canonical({"a":2})` |
+| Nested object sorting | `canonical({"z":{"b":2,"a":1}}) == canonical({"z":{"a":1,"b":2}})` |
+| Null field handling | `canonical({"a":null}) != canonical({})` |
+| Unicode stability | `canonical({"name":"hello"})` produces consistent bytes across platforms |
+| Datetime normalization | `canonical({"ts":"2026-09-05T12:00:00+00:00"}) == canonical({"ts":"2026-09-05T12:00:00Z"})` |
+| Empty metadata | `canonical({"metadata_json":"{}"})` is consistent |
+| Schema version present | `"_schema_version"` is always first key in sorted output |
+
+### 19.3 Hashing Tests
+
+| Test | Assertion |
+|------|-----------|
+| Same record → same hash | `hash(R) == hash(R)` (idempotent) |
+| One-field mutation → different hash | Changing any single protected field produces a different hash |
+| Hash excludes signature | Modifying signature does not change record_hash |
+| Hash excludes DB id | Modifying database UUID does not change record_hash |
+| Hash format | Output is 64-character lowercase hex string |
+| Known test vector | Pre-computed hash for a fixed input matches expected value |
+
+### 19.4 Signature Tests
+
+| Test | Assertion |
+|------|-----------|
+| Valid signature → verifies | `verify(sign(hash, privkey), hash, pubkey) == True` |
+| Modified record → fails | `verify(sig, modified_hash, pubkey) == False` |
+| Wrong public key → fails | `verify(sig, hash, wrong_pubkey) == False` |
+| Corrupted signature → fails | `verify(corrupted_sig, hash, pubkey) == False` |
+| Deterministic | `sign(hash, key) == sign(hash, key)` (Ed25519 is deterministic) |
+| Cross-key verification | Signature from key A does not verify with key B |
+
+### 19.5 Nonce Tests
+
+| Test | Assertion |
+|------|-----------|
+| Generated nonce uniqueness | 1000 generated nonces are all distinct |
+| Nonce format | 64-character lowercase hex string |
+| Nonce reuse detection | Creating a record with a duplicate nonce raises error |
+| Restart behavior | Nonce uniqueness is maintained across simulated restarts |
+
+### 19.6 Sequence Number Tests
+
+| Test | Assertion |
+|------|-----------|
+| Valid sequence | Records 1,2,3,4,5 pass chain verification |
+| Duplicate sequence | Records 1,2,3,3,4 fail with `SEQUENCE_VIOLATION` |
+| Gap detection | Records 1,2,4,5 fail with `CHAIN_BROKEN` |
+| Out-of-order | Records 1,2,4,3,5 fail with `CHAIN_BROKEN` |
+| Genesis starts at 1 | First record in chain has sequence_number = 1 |
+| Continuation after restart | After restart, next record gets MAX(seq)+1 |
+
+### 19.7 Chain Verification Tests
+
+| Test | Assertion |
+|------|-----------|
+| Valid chain | 10-record chain passes full verification |
+| Modified middle record | Changing payload of record 5 → `TAMPERED` at 5, `CHAIN_BROKEN` at 6 |
+| Deleted record | Removing record 5 from a 10-record chain → `CHAIN_BROKEN` |
+| Inserted record | Adding a record between 5 and 6 → `CHAIN_BROKEN` or `SEQUENCE_VIOLATION` |
+| Reordered records | Swapping records 5 and 6 → `CHAIN_BROKEN` |
+| Genesis anchor | Modifying project.genesis_nonce → genesis verification fails |
+| Empty chain | Chain with 0 records → `CHAIN_EMPTY` (valid, no records to verify) |
+| Single record chain | Chain with 1 record → verify genesis anchor + single record |
+
+### 19.8 Replay Detection Tests
+
+| Test | Assertion |
+|------|-----------|
+| Exact record replay | Submitting an identical record → `REPLAY_DETECTED` (nonce collision) |
+| Valid old signed record | Old record with valid signature but wrong sequence/chain position → rejected |
+| Reused nonce | New record body with copied nonce → `REPLAY_DETECTED` |
+| Cross-project replay | Record from project A submitted to project B → rejected (project_id mismatch in hash) |
+
+### 19.9 Key Management Tests
+
+| Test | Assertion |
+|------|-----------|
+| Key generation | Generated keypair can sign and verify |
+| Unknown key | Verification with unknown `signer_key_id` → `UNKNOWN_KEY` |
+| Rotated key | Records signed before rotation verify with old key; records after verify with new key |
+| Revoked key | Records signed before revocation verify; warning issued |
+| Key ID derivation | `key_id == SHA-256(public_key_bytes)[:16]` |
+
+### 19.10 Fail-Closed Tests
+
+| Test | Assertion |
+|------|-----------|
+| Malformed JSON in record | → `INVALID_SCHEMA` |
+| Missing required field | → `INVALID_SCHEMA` |
+| Invalid signature bytes | → `INVALID_SIGNATURE` |
+| Null record_hash | → `INVALID_SCHEMA` |
+| Chain mismatch on genesis | → `CHAIN_BROKEN` |
+| All failures generate findings | Each failure type creates a proof-layer finding |
+
+### 19.11 Integration Tests
+
+| Test | Description |
+|------|-------------|
+| End-to-end record creation | Create project → initialize keys → create 5 provenance records → verify chain |
+| Key rotation flow | Create records → rotate key → create more records → verify full chain |
+| Concurrent record creation | Simulate rapid sequential writes → verify sequence integrity |
+| Verification API roundtrip | Create records via API → verify via API → assert VALID response |
+
+---
+
+## 20. Security Limitations
+
+This section explicitly documents what the cryptographic provenance engine does NOT protect against, to prevent overclaiming.
+
+| ID | Limitation | Explanation |
+|----|------------|-------------|
+| L-01 | **Full disk access attacker** | An attacker with read/write access to the entire `data/` directory can modify the database AND use the signing key. The signatures become meaningless in this scenario. This is an inherent limitation of single-machine key storage. |
+| L-02 | **System clock manipulation** | Timestamps rely on the local clock. Clock tampering can forge temporal context. Replay detection does NOT depend on timestamps alone. |
+| L-03 | **Memory access / process inspection** | An attacker who can read process memory can extract the private key while it is loaded. Application-level protection against memory attacks is not feasible. |
+| L-04 | **Benignity assertion** | A valid signature proves that the signer created the record. It does NOT prove the artifact described by the record is safe, correct, or trustworthy. |
+| L-05 | **Pre-Phase-4 records** | Records created before Phase 4 implementation lack signatures, nonces, and cryptographic timestamps. They cannot be retroactively protected. |
+| L-06 | **Algorithm obsolescence** | If SHA-256 or Ed25519 are cryptographically broken in the future, all existing signatures and hashes lose their guarantees. Migration to new algorithms would require re-signing the entire chain. |
+| L-07 | **Key compromise detection** | The system can detect that a key has been revoked, but cannot detect that a key has been compromised if the attacker does not reveal the compromise. |
+| L-08 | **SQLite file replacement** | An attacker could replace the entire SQLite database file. This is detectable only if an external backup or hash of the database exists (e.g., exported chain hash). |
+| L-09 | **Unencrypted private key** | In v1, the private key is stored unencrypted on disk. Physical access to the workstation grants access to the key. |
+
+---
+
+## 21. Offline / Air-Gapped Considerations
+
+### 21.1 No Network Dependencies
+
+The entire cryptographic provenance engine operates without:
+
+| Dependency | Status |
+|------------|--------|
+| Internet | Not required |
+| Cloud key management (AWS KMS, Azure Key Vault, etc.) | Not used |
+| Public certificate authorities | Not used |
+| Certificate transparency logs | Not used |
+| Sigstore / Rekor | Not used |
+| Blockchain networks | Not used (optional future adapter) |
+| NTP time synchronization | Not required (clock trust is documented) |
+| External authentication | Not used |
+| Redis / Celery / external message queues | Not used |
+
+### 21.2 Library Requirements
+
+| Library | Source | Air-Gapped Availability |
+|---------|--------|------------------------|
+| `hashlib` | Python stdlib | Always available |
+| `os` / `secrets` | Python stdlib | Always available |
+| `json` | Python stdlib | Always available |
+| `cryptography` | PyPI | **Must be pre-installed** in the virtual environment |
+
+The `cryptography` library is the only additional dependency. It is already referenced in the project's dependency ecosystem (ADR-010). It must be added to `requirements.txt` when Phase 4 implementation begins.
+
+### 21.3 Key Generation Entropy
+
+`os.urandom()` draws from the OS entropy pool (`/dev/urandom` on Linux, `CryptGenRandom` on Windows). This works in air-gapped environments without any external entropy source.
+
+### 21.4 Offline Verification
+
+All verification operations use only:
+- The stored provenance records (SQLite database)
+- The public key(s) in `data/keys/`
+- Deterministic computation (SHA-256, Ed25519 verify, canonical serialization)
+
+No external service is consulted during verification.
+
+---
+
+## 22. Future Blockchain Integration Considerations
+
+### 22.1 Current State
+
+Per ADR-005 (amended), the blockchain adapter protocol is NOT defined in v1. The `blockchain_tx_id` column exists in `ProvenanceRecordModel` as a nullable forward-compatibility field.
+
+### 22.2 Integration Points
+
+When blockchain integration is implemented (Phase 2+), the design allows:
+
+1. **Record hash as blockchain payload:** The `record_hash` of each provenance record can be submitted to a blockchain as an anchor hash. The blockchain does not need to store the full record.
+
+2. **Write-through pattern:** Records are created in SQLite first (with full local integrity), then asynchronously anchored to the blockchain. `blockchain_tx_id` is populated upon confirmation.
+
+3. **Verification enhancement:** Chain verification first validates the local hash chain, then optionally checks blockchain anchors for additional tamper evidence.
+
+### 22.3 What Blockchain Adds Beyond This Design
+
+| Capability | Local Hash Chain (This Design) | With Blockchain |
+|-----------|-------------------------------|-----------------|
+| Tamper detection | Yes (hash chain + signatures) | Yes (+ distributed consensus) |
+| Single-point-of-failure resistance | No (single machine) | Yes (distributed) |
+| Multi-party verification | No (single verifier) | Yes (any node can verify) |
+| Independent audit | Requires sharing DB + public key | Only requires transaction ID |
+| Offline operation | Yes | No (requires network) |
+
+### 22.4 Design Compatibility
+
+This design is intentionally compatible with future blockchain anchoring:
+
+- `record_hash` provides a compact, deterministic anchor value
+- `signer_key_id` enables multi-party attribution
+- `sequence_number` provides ordering independent of blockchain ordering
+- `blockchain_tx_id` column is pre-provisioned
+- No design element assumes blockchain absence
+
+---
+
+## Appendix A: Diagrams
+
+### A.1 Record Creation Data Flow
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant PS as ProvenanceService
+    participant CS as CanonicalizationService
+    participant KM as KeyManager
+    participant DB as SQLite
+
+    App->>PS: create_record(payload)
+    PS->>DB: get_max_sequence(project_id)
+    DB-->>PS: last_seq = 4
+    PS->>PS: seq = 5, nonce = urandom(32)
+    PS->>DB: get_last_record_hash(project_id)
+    DB-->>PS: prev_hash = "abc..."
+    PS->>CS: canonicalize(protected_fields)
+    CS-->>PS: canonical_bytes
+    PS->>PS: record_hash = SHA-256(canonical_bytes)
+    PS->>KM: sign(record_hash)
+    KM-->>PS: signature
+    PS->>DB: INSERT record
+    DB-->>PS: OK
+    PS-->>App: ProvenanceRecord
+```
+
+### A.2 Verification Data Flow
+
+```mermaid
+sequenceDiagram
+    participant V as Verifier
+    participant CS as CanonicalizationService
+    participant KM as KeyManager
+    participant DB as SQLite
+
+    V->>DB: get_all_records(project_id, order_by=seq)
+    DB-->>V: records[]
+    V->>DB: get_project(project_id)
+    DB-->>V: project (genesis_nonce)
+    
+    loop For each record
+        V->>CS: canonicalize(protected_fields)
+        CS-->>V: canonical_bytes
+        V->>V: expected_hash = SHA-256(canonical_bytes)
+        V->>V: compare expected_hash with record.record_hash
+        V->>KM: get_public_key(record.signer_key_id)
+        KM-->>V: public_key
+        V->>V: Ed25519.verify(signature, record_hash, public_key)
+        V->>V: check sequence, previous_hash, nonce uniqueness
+    end
+    
+    V-->>V: VALID / failure code
+```
+
+### A.3 Key Rotation Sequence
+
+```mermaid
+sequenceDiagram
+    participant Op as Operator
+    participant KM as KeyManager
+    participant PS as ProvenanceService
+    participant DB as SQLite
+
+    Op->>KM: rotate_key()
+    KM->>KM: new_keypair = Ed25519.generate()
+    KM->>KM: new_key_id = SHA-256(new_pub)[:16]
+    KM->>KM: archive old key to revoked/
+    KM->>KM: install new key to active/
+    KM->>KM: update keyring.json
+    KM-->>PS: rotation_event
+    PS->>PS: create key_rotation provenance record
+    Note over PS: Signed with OLD key
+    PS->>DB: INSERT key_rotation record
+    PS-->>Op: rotation complete
+    Note over PS: All subsequent records use NEW key
+```
+
+---
+
+## Appendix B: Canonical Serialization Example
+
+**Input (Python dict):**
+
+```python
+{
+    "action": "ingest",
+    "_schema_version": "1",
+    "target_type": "dataset",
+    "project_id": "550e8400-e29b-41d4-a716-446655440000",
+    "record_type": "dataset_import",
+    "actor": "system",
+    "target_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    "input_hash": "a1b2c3d4e5f6071829",
+    "output_hash": None,
+    "metadata_json": "{}",
+    "sequence_number": 1,
+    "nonce": "deadbeef" * 8,
+    "timestamp": "2026-09-05T12:00:00Z",
+    "signer_key_id": "a1b2c3d4e5f60718",
+    "previous_record_hash": "0" * 64,
+}
+```
+
+**Canonical output (JSON, no whitespace, sorted keys):**
+
+```json
+{"_schema_version":"1","action":"ingest","actor":"system","input_hash":"a1b2c3d4e5f6071829","metadata_json":"{}","nonce":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","output_hash":null,"previous_record_hash":"0000000000000000000000000000000000000000000000000000000000000000","project_id":"550e8400-e29b-41d4-a716-446655440000","record_type":"dataset_import","sequence_number":1,"signer_key_id":"a1b2c3d4e5f60718","target_id":"6ba7b810-9dad-11d1-80b4-00c04fd430c8","target_type":"dataset","timestamp":"2026-09-05T12:00:00Z"}
+```
+
+**Then:** `record_hash = SHA-256(above bytes as UTF-8)`
+
+---
+
+*End of Cryptographic Design Specification*

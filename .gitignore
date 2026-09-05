@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+env/
+venv/
+ENV/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / Frontend
+node_modules/
+dist/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+.DS_Store
+
+# AIVARA local data
+data/aivara.db
+data/aivara.db-wal
+data/aivara.db-shm
+data/datasets/*
+!data/datasets/.gitkeep
+data/models/*
+!data/models/.gitkeep
+data/model_cache/*
+!data/model_cache/.gitkeep
+data/embeddings/*
+!data/embeddings/.gitkeep
+data/reports/*
+!data/reports/.gitkeep
+data/temp/*
+!data/temp/.gitkeep
+data/provenance/*
+!data/provenance/.gitkeep
