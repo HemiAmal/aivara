@@ -475,6 +475,12 @@ class ProvenanceRecordBase(BaseModel):
     input_hash: Optional[str] = Field(None, max_length=64)
     output_hash: Optional[str] = Field(None, max_length=64)
     metadata_json: Dict[str, Any] = Field(default_factory=dict)
+    nonce: Optional[str] = Field(None, max_length=64)
+    signer_key_id: Optional[str] = Field(None, max_length=64)
+    signature: Optional[str] = None
+    previous_record_hash: Optional[str] = Field(None, max_length=64)
+    record_hash: Optional[str] = Field(None, max_length=64)
+    sequence_number: Optional[int] = Field(None, ge=0)
 
 
 class ProvenanceRecordCreate(ProvenanceRecordBase):
@@ -486,10 +492,6 @@ class ProvenanceRecordRead(ProvenanceRecordBase):
 
     id: str
     project_id: str
-    signature: Optional[str] = None
-    previous_record_hash: Optional[str] = None
-    record_hash: Optional[str] = None
-    sequence_number: Optional[int] = None
     blockchain_tx_id: Optional[str] = None
     created_at: datetime
 

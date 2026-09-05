@@ -1,6 +1,13 @@
 """Database models and connection exports."""
 
-from aivara.database.connection import Base, engine, SessionLocal, init_db, get_db
+from aivara.database.connection import (
+    Base,
+    engine,
+    SessionLocal,
+    init_db,
+    get_db,
+    reconcile_provenance_schema,
+)
 from aivara.database.models import (
     ProjectModel,
     ContributorModel,
@@ -25,6 +32,7 @@ __all__ = [
     "SessionLocal",
     "init_db",
     "get_db",
+    "reconcile_provenance_schema",
     "ProjectModel",
     "ContributorModel",
     "DatasetModel",

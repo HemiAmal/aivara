@@ -1813,4 +1813,68 @@ The following are explicitly protected against false-positive tampering classifi
 
 ---
 
+## Appendix F: Phase 4.11 Implementation Specification (Persistent Replay Detection)
+
+### F.1 Replay Threat Model
+A replay attack in AIVARA occurs when an adversary or erroneous pipeline re-submits a previously accepted, authentic provenance event. Because the event was legitimate when originally produced, its cryptographic attributes (payload digest, digital signature, previous record hash) remain internally valid. 
+
+Without persistent replay protection, an attacker could:
+1. Re-introduce an obsolete model evaluation or dataset version record into an active assurance chain.
+2. Re-use an existing nonce to bypass unique challenge/execution guarantees.
+3. Duplicate sequence numbers to fork or desynchronize audit ledgers.
+4. Exploit process restarts or horizontal worker concurrency to replay events unnoticed.
+
+### F.2 In-Memory vs. Persistent Replay Protection
+- **In-Memory Replay Detection (`ProvenanceChain` in `aivara.crypto.chain`):**
+  Maintains transient sets of `_seen_nonces`, `_seen_sequences`, and `_seen_hashes` within an active process memory space. Useful for local, rapid verification of in-flight chains, but ephemeral: resets upon process shutdown or restart and cannot synchronize across concurrent workers.
+- **Persistent Replay Protection (`ProvenanceService` in `aivara.services.provenance_service`):**
+  Authoritatively enforced by relational database constraints in `ProvenanceRecordModel`. Persists across application restarts, system reboots, and horizontal worker processes. The database is the authoritative source of truth; in-memory caching is strictly advisory.
+
+### F.3 Compound Uniqueness Dimensions (Project-Scoped)
+In accordance with the ADR-028/029 architecture and Phase 4.1 security model, provenance chains are strictly scoped to projects:
+1. **`(project_id, sequence_number)` [UNIQUE]:** Sequence numbers are strictly monotonic within a project chain (Genesis = 0, Events = 1, 2, 3...). Different projects may legitimately reuse sequence numbers (e.g., both Project A and Project B have a sequence 1), but sequence numbers cannot be duplicated within the same project.
+2. **`(project_id, nonce)` [UNIQUE]:** 256-bit CSPRNG nonces (64 lowercase hex characters) are guaranteed unique within each project chain. A duplicate nonce within the same project is authoritatively rejected as `DUPLICATE_NONCE`.
+3. **`(project_id, record_hash)` [UNIQUE]:** Canonical SHA-256 record hashes represent unique provenance states. Re-submitting an identical record within the same project is authoritatively rejected as `DUPLICATE_RECORD`.
+
+### F.4 Authoritative Database Enforcement & Concurrency Safety
+Application-level "check-then-insert" logic is inherently race-prone under concurrency:
+```
+Thread A: check_replay() ➔ clean
+Thread B: check_replay() ➔ clean
+Thread A: INSERT ➔ succeeds
+Thread B: INSERT ➔ duplicates (if not DB-enforced)
+```
+To guarantee race safety:
+- Uniqueness is authoritatively enforced by compound database indexes (`ix_provenance_records_sequence`, `ix_provenance_records_project_nonce`, `ix_provenance_records_project_record_hash`).
+- Concurrent insertion attempts of duplicate records result in an atomic `IntegrityError` at the database engine level.
+- `ProvenanceService` intercepts `IntegrityError`, executes a clean transaction `rollback()`, classifies the failure via `classify_integrity_error()`, and raises the appropriate structured exception (`DuplicateNonceError`, `DuplicateSequenceError`, `DuplicateRecordError`, or `ReplayDetectedError`).
+- Unrelated database errors (e.g. foreign key constraint violations if `project_id` does not exist, or NOT NULL violations) are NOT classified as replays and are re-raised.
+
+### F.5 Restart Safety
+Persistent replay protection survives full application restarts. When a process terminates and restarts:
+1. Previously accepted records remain committed in the persistent database.
+2. Fresh service or repository instances query the database directly.
+3. Any attempt to re-submit a previously accepted provenance record is immediately rejected by either the advisory query or the authoritative database uniqueness constraint.
+
+### F.6 Cryptographic Distinction: Replay vs. Tampering
+AIVARA enforces a strict conceptual and diagnostic distinction between tampering and replay:
+- **Tampering (`aivara.crypto.tamper_detection`):**
+  *"The record's cryptographic integrity is internally broken or inconsistent."*
+  Examples: Record payload modified after signing (`RECORD_HASH_MISMATCH`), invalid digital signature (`INVALID_SIGNATURE`), corrupted hash chain linkage (`BROKEN_CHAIN`).
+- **Replay (`aivara.crypto.replay` / `aivara.services.provenance_service`):**
+  *"A previously accepted, internally valid provenance event is being submitted again."*
+  Example: An attacker submits an unmodified, perfectly signed record from 3 months ago.
+  Cryptographic status: Valid (`record_valid = True`, `signature_valid = True`).
+  Tamper status: Clean (`tampering_detected = False`).
+  Replay status: Rejected (`replay_detected = True`, `DUPLICATE_NONCE` or `DUPLICATE_RECORD`).
+
+### F.7 SQLite Concurrency Semantics & Limitations
+In SQLite environments:
+- Write concurrency is serialized at the database file level (even with WAL mode enabled).
+- Thread-safe concurrency tests use SQLite `WAL` mode and transaction rollbacks to prove that simultaneous worker threads attempting duplicate insertion cannot corrupt state or insert duplicates. Exactly one thread succeeds, while competing threads receive structured replay rejections.
+- For production enterprise multi-node deployments with high concurrent write throughput, PostgreSQL is recommended. The compound unique indexes and `IntegrityError` classification engine are database-agnostic and fully compatible with PostgreSQL.
+
+---
+
 *End of Cryptographic Design Specification*
+

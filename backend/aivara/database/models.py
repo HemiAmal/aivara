@@ -502,7 +502,9 @@ class ProvenanceRecordModel(Base):
     input_hash = Column(String(64), nullable=True)
     output_hash = Column(String(64), nullable=True)
     metadata_json = Column(JSON, default=dict, nullable=False)
-    signature = Column(Text, nullable=True)  # placeholder for Phase 4 Ed25519
+    signature = Column(Text, nullable=True)  # Ed25519 signature (Phase 4.5)
+    signer_key_id = Column(String(64), nullable=True)
+    nonce = Column(String(64), nullable=True)
     previous_record_hash = Column(String(64), nullable=True)
     record_hash = Column(String(64), nullable=True)
     sequence_number = Column(Integer, nullable=True)
@@ -514,7 +516,9 @@ class ProvenanceRecordModel(Base):
 
     __table_args__ = (
         Index("ix_provenance_records_project_id", "project_id"),
-        Index("ix_provenance_records_sequence", "project_id", "sequence_number"),
+        Index("ix_provenance_records_sequence", "project_id", "sequence_number", unique=True),
+        Index("ix_provenance_records_project_nonce", "project_id", "nonce", unique=True),
+        Index("ix_provenance_records_project_record_hash", "project_id", "record_hash", unique=True),
         Index("ix_provenance_records_record_type", "record_type"),
     )
 

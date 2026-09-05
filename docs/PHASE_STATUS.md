@@ -12,7 +12,7 @@
 | **PHASE 1** | Environment Validation & Prerequisites Check | **COMPLETE** | 2026-08-31 |
 | **PHASE 2** | Repository Foundation & Minimal Backend Skeleton | **COMPLETE** | 2026-08-31 |
 | **PHASE 3** | Domain Model & Relational Database Schema Implementation | **COMPLETE** | 2026-09-01 |
-| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1–4.10 Complete) | In Progress |
+| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1–4.11 Complete) | In Progress |
 | **PHASE 4.1** | Cryptographic Provenance Engine Design Review | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.2** | Canonical Serialization Engine (RFC 8785 / JCS) | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.3** | SHA-256 Hashing Engine & Canonical Bridge | **COMPLETE** | 2026-09-05 |
@@ -21,7 +21,31 @@
 | **PHASE 4.6** | Nonce, Sequence & Provenance Chain Engine | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.9** | Verification Engine Reconciliation & Completion | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.10** | Cryptographic Tamper Detection Engine | **COMPLETE** | 2026-09-05 |
-| **PHASE 4.11+** | Replay Detection, Audit Logging & Verification APIs | **NOT STARTED** | Pending User Authorization |
+| **PHASE 4.11** | Persistent Replay Detection Engine | **COMPLETE** | 2026-09-05 |
+| **PHASE 4.12+** | API Integration, Audit Logging & Security Demonstrations | **NOT STARTED** | Pending User Authorization |
+
+---
+
+## Phase 4.11 Completed Deliverables
+- [x] Implemented persistent, restart-safe, and concurrency-safe replay detection anchored by database uniqueness constraints (`backend/aivara/crypto/replay.py`, `backend/aivara/services/provenance_service.py`).
+- [x] Updated `ProvenanceRecordModel` in `backend/aivara/database/models.py` with `nonce` and `signer_key_id` columns, plus minimal compound unique indexes:
+  - `(project_id, sequence_number)` [UNIQUE]
+  - `(project_id, nonce)` [UNIQUE]
+  - `(project_id, record_hash)` [UNIQUE]
+- [x] Updated Pydantic domain schemas in `backend/aivara/domain/schemas.py` (`ProvenanceRecordBase`, `ProvenanceRecordCreate`, `ProvenanceRecordRead`) to include cryptographic fields (`nonce`, `signer_key_id`, `signature`, `previous_record_hash`, `record_hash`, `sequence_number`).
+- [x] Implemented structured replay diagnostic model `ReplayAssessment` with `ReplayType` enum (`NONE`, `DUPLICATE_NONCE`, `DUPLICATE_SEQUENCE`, `DUPLICATE_RECORD`, `REPLAY_DETECTED`), safely reporting non-secret diagnostics.
+- [x] Implemented database error classification engine `classify_integrity_error` distinguishing unique constraint replays from unrelated database errors (foreign key violations, NOT NULL errors).
+- [x] Implemented `ProvenanceService`:
+  - Advisory replay checks (`check_replay`).
+  - Atomic, concurrency-safe persistence (`record_provenance_event`) catching `IntegrityError`, performing clean transaction rollback, and raising typed replay errors (`DuplicateNonceError`, `DuplicateSequenceError`, `DuplicateRecordError`, `ReplayDetectedError`).
+  - Safe record lookup and chain query operations (`get_record`, `get_record_by_sequence`, `get_record_by_hash`, `get_record_by_nonce`, `list_records`, `get_latest_record`).
+- [x] Proved complete restart safety: committed records survive full process shutdown and engine disposal, authoritatively blocking replayed records on restart.
+- [x] Proved concurrency safety: multi-threaded simultaneous duplicate insertion attempts safely rollback with exactly one record committed and competing workers receiving structured replay rejections.
+- [x] Enforced strict conceptual separation: authentic old signed records are classified as replay (`REPLAY_DETECTED`), NOT tampering (`TAMPERING`).
+- [x] Created comprehensive test suite `tests/test_replay_detection.py` with 20 focused tests covering all 18 minimum requirements (20/20 passing).
+- [x] Verified full regression test suite across the entire project (264/264 tests passing in 33.27s).
+- [x] Documented replay threat model, database uniqueness constraints, restart/concurrency semantics, and SQLite limitations in `docs/CRYPTOGRAPHIC_DESIGN.md` (Appendix F).
+- [x] Confirmed Phase 4.12+ (API integration, audit logging, security tests) remain NOT STARTED.
 
 ---
 

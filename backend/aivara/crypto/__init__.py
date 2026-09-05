@@ -127,6 +127,12 @@ from aivara.crypto.tamper_detection import (
     assess_chain_tampering,
     assess_record_tampering,
 )
+from aivara.crypto.replay import (
+    ReplayAssessment,
+    ReplayType,
+    classify_integrity_error,
+    raise_replay_error,
+)
 
 __all__ = [
     # Canonicalization (Phase 4.2)
@@ -249,4 +255,9 @@ __all__ = [
     "TamperDetector",
     "assess_record_tampering",
     "assess_chain_tampering",
+    # Replay Detection (Phase 4.11)
+    "ReplayType",
+    "ReplayAssessment",
+    "classify_integrity_error",
+    "raise_replay_error",
 ]

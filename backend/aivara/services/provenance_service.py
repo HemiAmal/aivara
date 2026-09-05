@@ -1,0 +1,372 @@
+"""Provenance service with persistent, concurrency-safe replay protection (Phase 4.11).
+
+Provides:
+  - Persistent provenance record lifecycle management.
+  - Advisory and authoritative database-enforced replay detection.
+  - Restart safety: replay detection survives application restarts by querying authoritative DB.
+  - Concurrency safety: database uniqueness constraints prevent races, rolling back cleanly.
+  - Safe error translation: maps database IntegrityError to structured replay errors
+    (DuplicateNonceError, DuplicateSequenceError, DuplicateRecordError, ReplayDetectedError)
+    while passing unrelated database integrity errors through.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Union
+
+from sqlalchemy import desc
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from aivara.core.exceptions import NotFoundException
+from aivara.crypto.chain import (
+    ChainRecord,
+    DuplicateNonceError,
+    DuplicateRecordError,
+    DuplicateSequenceError,
+    InvalidNonceError,
+    InvalidSequenceError,
+    ReplayDetectedError,
+    validate_nonce,
+)
+from aivara.crypto.keys import KeyManager
+from aivara.crypto.replay import (
+    ReplayAssessment,
+    ReplayType,
+    classify_integrity_error,
+    raise_replay_error,
+)
+from aivara.crypto.verification import FailureCode, verify_record
+from aivara.database.models import ProvenanceRecordModel
+from aivara.domain.schemas import (
+    ProvenanceRecordCreate,
+    ProvenanceRecordRead,
+)
+
+
+class ProvenanceService:
+    """Service managing persistent provenance records and replay detection."""
+
+    def __init__(self, db: Session) -> None:
+        """Initialize ProvenanceService with a SQLAlchemy session.
+
+        Args:
+            db: Active SQLAlchemy database session.
+        """
+        self.db = db
+
+    def check_replay(
+        self,
+        project_id: str,
+        *,
+        sequence_number: Optional[int] = None,
+        nonce: Optional[str] = None,
+        record_hash: Optional[str] = None,
+    ) -> ReplayAssessment:
+        """Advisory query to evaluate whether a record would conflict with existing records.
+
+        Note: Application-level check alone is not sufficient under concurrency.
+        The database unique constraints are authoritative.
+
+        Args:
+            project_id: Target project identifier.
+            sequence_number: Sequence number to test.
+            nonce: Nonce to test.
+            record_hash: Record hash to test.
+
+        Returns:
+            ReplayAssessment indicating whether a replay condition was detected.
+        """
+        # 1. Check duplicate nonce
+        if nonce is not None:
+            existing_nonce = (
+                self.db.query(ProvenanceRecordModel.id)
+                .filter(
+                    ProvenanceRecordModel.project_id == project_id,
+                    ProvenanceRecordModel.nonce == nonce,
+                )
+                .first()
+            )
+            if existing_nonce:
+                return ReplayAssessment(
+                    replay_detected=True,
+                    replay_type=ReplayType.DUPLICATE_NONCE,
+                    project_id=project_id,
+                    sequence_number=sequence_number,
+                    nonce=nonce,
+                    record_hash=record_hash,
+                    conflicting_record_id=str(existing_nonce[0]),
+                    reason=f"Replay detected: duplicate nonce '{nonce}' already accepted in project '{project_id}'.",
+                )
+
+        # 2. Check duplicate sequence number
+        if sequence_number is not None:
+            existing_seq = (
+                self.db.query(ProvenanceRecordModel.id)
+                .filter(
+                    ProvenanceRecordModel.project_id == project_id,
+                    ProvenanceRecordModel.sequence_number == sequence_number,
+                )
+                .first()
+            )
+            if existing_seq:
+                return ReplayAssessment(
+                    replay_detected=True,
+                    replay_type=ReplayType.DUPLICATE_SEQUENCE,
+                    project_id=project_id,
+                    sequence_number=sequence_number,
+                    nonce=nonce,
+                    record_hash=record_hash,
+                    conflicting_record_id=str(existing_seq[0]),
+                    reason=f"Replay detected: sequence number {sequence_number} already exists in project '{project_id}'.",
+                )
+
+        # 3. Check duplicate record hash
+        if record_hash is not None:
+            existing_hash = (
+                self.db.query(ProvenanceRecordModel.id)
+                .filter(
+                    ProvenanceRecordModel.project_id == project_id,
+                    ProvenanceRecordModel.record_hash == record_hash,
+                )
+                .first()
+            )
+            if existing_hash:
+                return ReplayAssessment(
+                    replay_detected=True,
+                    replay_type=ReplayType.DUPLICATE_RECORD,
+                    project_id=project_id,
+                    sequence_number=sequence_number,
+                    nonce=nonce,
+                    record_hash=record_hash,
+                    conflicting_record_id=str(existing_hash[0]),
+                    reason=f"Replay detected: duplicate record hash '{record_hash}' already exists in project '{project_id}'.",
+                )
+
+        return ReplayAssessment(
+            replay_detected=False,
+            replay_type=ReplayType.NONE,
+            project_id=project_id,
+            sequence_number=sequence_number,
+            nonce=nonce,
+            record_hash=record_hash,
+            reason="No replay detected.",
+        )
+
+    def record_provenance_event(
+        self,
+        record_data: Union[ProvenanceRecordCreate, ChainRecord, Dict[str, Any]],
+        *,
+        verify_first: bool = False,
+        key_manager: Optional[KeyManager] = None,
+    ) -> ProvenanceRecordRead:
+        """Atomically persist a provenance record with database-authoritative replay protection.
+
+        Args:
+            record_data: ProvenanceRecordCreate, ChainRecord, or dict containing record fields.
+            verify_first: If True, executes cryptographic verification prior to persistence.
+            key_manager: KeyManager for resolving public keys if verify_first=True.
+
+        Returns:
+            ProvenanceRecordRead representing the persisted record.
+
+        Raises:
+            DuplicateNonceError: If nonce was already accepted in the project.
+            DuplicateSequenceError: If sequence number was already accepted in the project.
+            DuplicateRecordError: If record hash was already accepted in the project.
+            ReplayDetectedError: If another uniqueness conflict is detected.
+            InvalidNonceError: If nonce format is invalid.
+            InvalidSequenceError: If sequence number is negative or invalid.
+            IntegrityError: If an unrelated database integrity violation occurred (e.g. invalid FK).
+        """
+        # Normalize fields to dict
+        if isinstance(record_data, ChainRecord):
+            raw = record_data.model_dump()
+        elif isinstance(record_data, ProvenanceRecordCreate):
+            raw = record_data.model_dump()
+        elif isinstance(record_data, dict):
+            raw = dict(record_data)
+        else:
+            raise TypeError(f"Unsupported record_data type: {type(record_data).__name__}")
+
+        project_id = raw.get("project_id")
+        if not project_id or not isinstance(project_id, str):
+            raise ValueError("project_id is required and must be a string.")
+
+        nonce = raw.get("nonce")
+        if nonce is not None:
+            validate_nonce(nonce)
+
+        seq = raw.get("sequence_number")
+        if seq is not None:
+            if not isinstance(seq, int) or seq < 0:
+                raise InvalidSequenceError(f"Sequence number must be non-negative integer, got {seq}.")
+
+        rec_hash = raw.get("record_hash")
+
+        # Cryptographic verification if requested
+        if verify_first:
+            res = verify_record(
+                raw,
+                key_manager=key_manager,
+                allow_unsigned=True,
+                expected_project_id=project_id,
+            )
+            # Replay failures during verification
+            for f in res.failures:
+                if f.code in (
+                    FailureCode.DUPLICATE_NONCE,
+                    FailureCode.DUPLICATE_SEQUENCE,
+                    FailureCode.DUPLICATE_RECORD,
+                    FailureCode.REPLAY_DETECTED,
+                ):
+                    assessment = ReplayAssessment(
+                        replay_detected=True,
+                        replay_type=ReplayType(f.code.value) if f.code.value in ReplayType._value2member_map_ else ReplayType.REPLAY_DETECTED,
+                        project_id=project_id,
+                        sequence_number=seq,
+                        nonce=nonce,
+                        record_hash=rec_hash,
+                        reason=f.message,
+                    )
+                    raise_replay_error(assessment)
+
+        # Advisory check
+        advisory = self.check_replay(
+            project_id=project_id,
+            sequence_number=seq,
+            nonce=nonce,
+            record_hash=rec_hash,
+        )
+        if advisory.replay_detected:
+            raise_replay_error(advisory)
+
+        # Construct SQLAlchemy model
+        model = ProvenanceRecordModel(
+            project_id=project_id,
+            record_type=raw.get("record_type", "EVENT"),
+            actor=raw.get("actor", "system"),
+            action=raw.get("action", "record"),
+            target_type=raw.get("target_type"),
+            target_id=raw.get("target_id"),
+            input_hash=raw.get("input_hash"),
+            output_hash=raw.get("output_hash"),
+            metadata_json=raw.get("metadata_json") or {},
+            signature=raw.get("signature"),
+            signer_key_id=raw.get("signer_key_id"),
+            nonce=nonce,
+            previous_record_hash=raw.get("previous_record_hash"),
+            record_hash=rec_hash,
+            sequence_number=seq,
+            blockchain_tx_id=raw.get("blockchain_tx_id"),
+        )
+
+        # Atomic insertion with rollback and error classification
+        try:
+            self.db.add(model)
+            self.db.commit()
+            self.db.refresh(model)
+            return ProvenanceRecordRead.model_validate(model)
+        except IntegrityError as exc:
+            self.db.rollback()
+            is_replay, r_type, reason, conf_id = classify_integrity_error(
+                exc=exc,
+                project_id=project_id,
+                sequence_number=seq,
+                nonce=nonce,
+                record_hash=rec_hash,
+                db=self.db,
+            )
+            if is_replay:
+                assessment = ReplayAssessment(
+                    replay_detected=True,
+                    replay_type=r_type,
+                    project_id=project_id,
+                    sequence_number=seq,
+                    nonce=nonce,
+                    record_hash=rec_hash,
+                    conflicting_record_id=conf_id,
+                    reason=reason,
+                )
+                raise_replay_error(assessment)
+            # Unrelated database error (e.g. foreign key failure) — do NOT classify as replay
+            raise exc
+
+    def get_record(self, record_id: str) -> Optional[ProvenanceRecordRead]:
+        """Fetch a provenance record by its primary key ID."""
+        record = self.db.query(ProvenanceRecordModel).filter(ProvenanceRecordModel.id == record_id).first()
+        if not record:
+            return None
+        return ProvenanceRecordRead.model_validate(record)
+
+    def get_record_by_sequence(self, project_id: str, sequence_number: int) -> Optional[ProvenanceRecordRead]:
+        """Fetch a provenance record by project and sequence number."""
+        record = (
+            self.db.query(ProvenanceRecordModel)
+            .filter(
+                ProvenanceRecordModel.project_id == project_id,
+                ProvenanceRecordModel.sequence_number == sequence_number,
+            )
+            .first()
+        )
+        if not record:
+            return None
+        return ProvenanceRecordRead.model_validate(record)
+
+    def get_record_by_hash(self, project_id: str, record_hash: str) -> Optional[ProvenanceRecordRead]:
+        """Fetch a provenance record by project and record hash."""
+        record = (
+            self.db.query(ProvenanceRecordModel)
+            .filter(
+                ProvenanceRecordModel.project_id == project_id,
+                ProvenanceRecordModel.record_hash == record_hash,
+            )
+            .first()
+        )
+        if not record:
+            return None
+        return ProvenanceRecordRead.model_validate(record)
+
+    def get_record_by_nonce(self, project_id: str, nonce: str) -> Optional[ProvenanceRecordRead]:
+        """Fetch a provenance record by project and nonce."""
+        record = (
+            self.db.query(ProvenanceRecordModel)
+            .filter(
+                ProvenanceRecordModel.project_id == project_id,
+                ProvenanceRecordModel.nonce == nonce,
+            )
+            .first()
+        )
+        if not record:
+            return None
+        return ProvenanceRecordRead.model_validate(record)
+
+    def list_records(
+        self,
+        project_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[ProvenanceRecordRead]:
+        """List provenance records for a project ordered by sequence number ascending."""
+        records = (
+            self.db.query(ProvenanceRecordModel)
+            .filter(ProvenanceRecordModel.project_id == project_id)
+            .order_by(ProvenanceRecordModel.sequence_number.asc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        return [ProvenanceRecordRead.model_validate(r) for r in records]
+
+    def get_latest_record(self, project_id: str) -> Optional[ProvenanceRecordRead]:
+        """Fetch the highest sequence number provenance record in a project."""
+        record = (
+            self.db.query(ProvenanceRecordModel)
+            .filter(ProvenanceRecordModel.project_id == project_id)
+            .order_by(desc(ProvenanceRecordModel.sequence_number))
+            .first()
+        )
+        if not record:
+            return None
+        return ProvenanceRecordRead.model_validate(record)
