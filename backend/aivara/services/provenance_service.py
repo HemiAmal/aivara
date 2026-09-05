@@ -18,7 +18,7 @@ from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from aivara.core.exceptions import NotFoundException
+from aivara.core.exceptions import NotFoundException, ValidationException
 from aivara.crypto.chain import (
     ChainRecord,
     DuplicateNonceError,
@@ -36,7 +36,19 @@ from aivara.crypto.replay import (
     classify_integrity_error,
     raise_replay_error,
 )
-from aivara.crypto.verification import FailureCode, verify_record
+from aivara.crypto.tamper_detection import (
+    ChainTamperAssessment,
+    TamperAssessment,
+    assess_chain_tampering as assess_chain_tampering_fn,
+    assess_record_tampering as assess_record_tampering_fn,
+)
+from aivara.crypto.verification import (
+    FailureCode,
+    UnifiedChainVerificationResult,
+    UnifiedVerificationResult,
+    verify_provenance_chain,
+    verify_record,
+)
 from aivara.database.models import ProvenanceRecordModel
 from aivara.domain.schemas import (
     ProvenanceRecordCreate,
@@ -47,13 +59,15 @@ from aivara.domain.schemas import (
 class ProvenanceService:
     """Service managing persistent provenance records and replay detection."""
 
-    def __init__(self, db: Session) -> None:
-        """Initialize ProvenanceService with a SQLAlchemy session.
+    def __init__(self, db: Session, key_manager: Optional[KeyManager] = None) -> None:
+        """Initialize ProvenanceService with a SQLAlchemy session and optional KeyManager.
 
         Args:
             db: Active SQLAlchemy database session.
+            key_manager: Optional KeyManager instance for resolving public keys.
         """
         self.db = db
+        self.key_manager = key_manager
 
     def check_replay(
         self,
@@ -370,3 +384,142 @@ class ProvenanceService:
         if not record:
             return None
         return ProvenanceRecordRead.model_validate(record)
+
+    def verify_record(
+        self,
+        record: Optional[Union[Dict[str, Any], ChainRecord, ProvenanceRecordRead]] = None,
+        *,
+        record_id: Optional[str] = None,
+        expected_project_id: Optional[str] = None,
+        expected_sequence: Optional[int] = None,
+        expected_previous_record_hash: Optional[str] = None,
+        allow_unsigned: bool = True,
+    ) -> UnifiedVerificationResult:
+        """Cryptographically verify a provenance record, supplied directly or loaded by ID.
+
+        Args:
+            record: Optional in-memory provenance record payload.
+            record_id: Optional database ID to load record from database.
+            expected_project_id: Optional expected project ID to validate against.
+            expected_sequence: Optional expected sequence number to validate against.
+            expected_previous_record_hash: Optional expected previous hash to validate against.
+            allow_unsigned: Whether unsigned records are permitted without failure.
+
+        Returns:
+            UnifiedVerificationResult containing diagnostic evaluation across all layers.
+
+        Raises:
+            NotFoundException: If record_id is specified but does not exist in DB.
+            ValidationException: If neither record nor record_id is provided.
+        """
+        if record is None and record_id is not None:
+            db_record = self.get_record(record_id)
+            if not db_record:
+                raise NotFoundException(f"Provenance record '{record_id}' not found.")
+            target_data = db_record.model_dump()
+        elif record is not None:
+            if hasattr(record, "model_dump"):
+                target_data = record.model_dump()
+            elif isinstance(record, dict):
+                target_data = dict(record)
+            else:
+                target_data = dict(record)
+        else:
+            raise ValidationException("Either 'record' payload or 'record_id' must be provided for verification.")
+
+        return verify_record(
+            record=target_data,
+            key_manager=self.key_manager,
+            allow_unsigned=allow_unsigned,
+            expected_project_id=expected_project_id,
+            expected_sequence=expected_sequence,
+            expected_previous_record_hash=expected_previous_record_hash,
+        )
+
+    def verify_chain(
+        self,
+        *,
+        project_id: Optional[str] = None,
+        records: Optional[Sequence[Union[Dict[str, Any], ChainRecord, ProvenanceRecordRead]]] = None,
+        allow_unsigned: bool = True,
+    ) -> UnifiedChainVerificationResult:
+        """Cryptographically verify a provenance chain, supplied directly or loaded from DB.
+
+        Args:
+            project_id: Optional project identifier to load chain from DB (or enforce).
+            records: Optional in-memory sequence of provenance records.
+            allow_unsigned: Whether unsigned records are permitted without failure.
+
+        Returns:
+            UnifiedChainVerificationResult containing full chain diagnostic evaluation.
+
+        Raises:
+            ValidationException: If neither records nor project_id is provided.
+        """
+        if records is not None:
+            target_records = [
+                r.model_dump() if hasattr(r, "model_dump") else dict(r) for r in records
+            ]
+        elif project_id is not None:
+            db_records = self.list_records(project_id, limit=10000)
+            target_records = [r.model_dump() for r in db_records]
+        else:
+            raise ValidationException("Either 'records' or 'project_id' must be provided for chain verification.")
+
+        return verify_provenance_chain(
+            records=target_records,
+            expected_project_id=project_id,
+            key_manager=self.key_manager,
+            allow_unsigned=allow_unsigned,
+        )
+
+    def assess_record_tampering(
+        self,
+        record: Optional[Union[Dict[str, Any], ChainRecord, ProvenanceRecordRead]] = None,
+        *,
+        record_id: Optional[str] = None,
+        expected_project_id: Optional[str] = None,
+        allow_unsigned: bool = True,
+    ) -> TamperAssessment:
+        """Assess cryptographic tampering on a single record by verifying it and classifying findings.
+
+        Args:
+            record: Optional in-memory record payload.
+            record_id: Optional database ID to load record from DB.
+            expected_project_id: Optional expected project ID.
+            allow_unsigned: Whether unsigned records are permitted without failure.
+
+        Returns:
+            TamperAssessment detailing tampering status, confidence, severity, and findings.
+        """
+        v_res = self.verify_record(
+            record=record,
+            record_id=record_id,
+            expected_project_id=expected_project_id,
+            allow_unsigned=allow_unsigned,
+        )
+        return assess_record_tampering_fn(v_res)
+
+    def assess_chain_tampering(
+        self,
+        *,
+        project_id: Optional[str] = None,
+        records: Optional[Sequence[Union[Dict[str, Any], ChainRecord, ProvenanceRecordRead]]] = None,
+        allow_unsigned: bool = True,
+    ) -> ChainTamperAssessment:
+        """Assess cryptographic tampering across an entire chain.
+
+        Args:
+            project_id: Optional project identifier to load chain from DB.
+            records: Optional in-memory sequence of records.
+            allow_unsigned: Whether unsigned records are permitted.
+
+        Returns:
+            ChainTamperAssessment detailing chain-wide tampering status and findings.
+        """
+        chain_res = self.verify_chain(
+            project_id=project_id,
+            records=records,
+            allow_unsigned=allow_unsigned,
+        )
+        return assess_chain_tampering_fn(chain_res)

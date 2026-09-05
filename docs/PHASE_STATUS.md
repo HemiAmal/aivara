@@ -12,7 +12,7 @@
 | **PHASE 1** | Environment Validation & Prerequisites Check | **COMPLETE** | 2026-08-31 |
 | **PHASE 2** | Repository Foundation & Minimal Backend Skeleton | **COMPLETE** | 2026-08-31 |
 | **PHASE 3** | Domain Model & Relational Database Schema Implementation | **COMPLETE** | 2026-09-01 |
-| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1–4.11 Complete) | In Progress |
+| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1–4.12 Complete) | In Progress |
 | **PHASE 4.1** | Cryptographic Provenance Engine Design Review | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.2** | Canonical Serialization Engine (RFC 8785 / JCS) | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.3** | SHA-256 Hashing Engine & Canonical Bridge | **COMPLETE** | 2026-09-05 |
@@ -22,7 +22,47 @@
 | **PHASE 4.9** | Verification Engine Reconciliation & Completion | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.10** | Cryptographic Tamper Detection Engine | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.11** | Persistent Replay Detection Engine | **COMPLETE** | 2026-09-05 |
-| **PHASE 4.12+** | API Integration, Audit Logging & Security Demonstrations | **NOT STARTED** | Pending User Authorization |
+| **PHASE 4.12** | REST API Integration & Thin Router Adapters | **COMPLETE** | 2026-09-05 |
+| **PHASE 4.13+** | Audit Logging, Security Tests & Attack Demos | **NOT STARTED** | Pending User Authorization |
+
+---
+
+## Phase 4.12 Completed Deliverables
+- [x] Implemented thin FastAPI REST router adapters under `/api/v1/provenance` (`backend/aivara/api/routers/provenance.py`) adhering strictly to the thin adapter architecture (`API Router -> Pydantic Schema -> Service / Domain Layer -> Crypto / Provenance Engine -> Database`).
+- [x] Zero cryptographic logic leakage: No canonicalization, SHA-256 hashing, signing, key generation, verification, tamper classification, or replay caches inside router functions.
+- [x] Created typed Pydantic API schemas in `backend/aivara/domain/schemas.py`:
+  - `ReplayCheckRequest`
+  - `RecordVerificationRequest`
+  - `ChainVerificationRequest`
+  - `RecordTamperAssessmentRequest`
+  - `ChainTamperAssessmentRequest`
+- [x] Extended `ProvenanceService` in `backend/aivara/services/provenance_service.py` to provide a clean service boundary delegating to `ProvenanceVerificationEngine` and `TamperDetector` for record/chain verification and tamper assessments.
+- [x] Registered dedicated FastAPI exception handler in `backend/aivara/api/errors.py` mapping domain replay exceptions (`DuplicateNonceError`, `DuplicateSequenceError`, `DuplicateRecordError`, `ReplayDetectedError`) to HTTP 409 Conflict with structured non-secret error details (`replay_type`, `project_id`, `sequence_number`, `nonce`, `record_hash`).
+- [x] Clean error and status mapping:
+  - Missing records return HTTP 404 with standardized error envelope.
+  - Malformed inputs return HTTP 422 Unprocessable Entity.
+  - Cryptographic verification failures (invalid record hash, broken signature) return HTTP 200 OK with `overall_valid=False` and structured failure diagnostics (not transport 500 errors).
+  - Tamper assessments return HTTP 200 OK with structured `TamperAssessment` (status `clean`, `integrity_violation`, `authenticity_unavailable`, `unverifiable_input`).
+  - Unknown signer keys return HTTP 200 OK with `status="authenticity_unavailable"`.
+- [x] Exposed 13 complete REST endpoints:
+  - `POST /api/v1/provenance/records` (201 Created)
+  - `POST /api/v1/provenance/replay-check` (200 OK)
+  - `GET /api/v1/provenance/records/{record_id}` (200 OK)
+  - `GET /api/v1/provenance/records` (200 OK, paginated)
+  - `GET /api/v1/provenance/chain/{project_id}` (200 OK)
+  - `POST /api/v1/provenance/records/verify` (200 OK)
+  - `GET /api/v1/provenance/records/{record_id}/verify` (200 OK)
+  - `POST /api/v1/provenance/chain/verify` (200 OK)
+  - `GET /api/v1/provenance/chain/{project_id}/verify` (200 OK)
+  - `POST /api/v1/provenance/records/tamper-assessment` (200 OK)
+  - `GET /api/v1/provenance/records/{record_id}/tamper-assessment` (200 OK)
+  - `POST /api/v1/provenance/chain/tamper-assessment` (200 OK)
+  - `GET /api/v1/provenance/chain/{project_id}/tamper-assessment` (200 OK)
+- [x] Local-first, offline security: No external network calls, zero exposure of private keys or passphrases, no stack traces leaked in error responses.
+- [x] Created comprehensive API test suite `tests/test_provenance_api.py` covering all 20 required specifications (22/22 tests passing).
+- [x] Full regression test suite passing across the entire project (287/287 tests passing in 42.03s).
+- [x] Verified OpenAPI registration for all endpoints at `/openapi.json`.
+- [x] Confirmed Phase 4.13 (Audit Logging), Phase 4.14 (Security Tests), and Phase 4.15 (Attack Demos) remain NOT STARTED.
 
 ---
 

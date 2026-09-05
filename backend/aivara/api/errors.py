@@ -6,12 +6,32 @@ from fastapi.responses import JSONResponse
 from aivara.api.envelope import ApiErrorResponse, ErrorDetail, ResponseMeta
 from aivara.core.exceptions import AivaraException, NotFoundException, ValidationException
 from aivara.core.logging import get_logger
+from aivara.crypto.chain import (
+    DuplicateNonceError,
+    DuplicateRecordError,
+    DuplicateSequenceError,
+    ReplayDetectedError,
+)
 
 logger = get_logger(__name__)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach global exception handlers producing standardized JSON responses."""
+
+    @app.exception_handler(DuplicateNonceError)
+    @app.exception_handler(DuplicateSequenceError)
+    @app.exception_handler(DuplicateRecordError)
+    @app.exception_handler(ReplayDetectedError)
+    async def replay_detected_handler(request: Request, exc: AivaraException):
+        logger.warning("Replay detected: %s (code=%s)", exc.message, exc.code)
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=ApiErrorResponse(
+                error=ErrorDetail(code=exc.code, message=exc.message, details=exc.details),
+                meta=ResponseMeta(),
+            ).model_dump(),
+        )
 
     @app.exception_handler(NotFoundException)
     async def not_found_handler(request: Request, exc: NotFoundException):

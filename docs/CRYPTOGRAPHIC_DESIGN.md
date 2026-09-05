@@ -1876,5 +1876,76 @@ In SQLite environments:
 
 ---
 
+## Appendix G: Phase 4.12 Implementation Specification (REST API Integration & Thin Router Adapters)
+
+### G.1 Architectural Boundary: Thin Adapter Pattern
+Phase 4.12 exposes the completed cryptographic provenance, verification, tamper assessment, and replay protection capabilities via FastAPI REST endpoints under the `/api/v1/provenance` namespace. 
+
+The API layer is strictly implemented as a **thin adapter**:
+```
+HTTP Request
+     ↓
+FastAPI Router (backend/aivara/api/routers/provenance.py)
+     ↓
+Pydantic API Schema (backend/aivara/domain/schemas.py)
+     ↓
+Service / Domain Layer (backend/aivara/services/provenance_service.py)
+     ↓
+Crypto / Provenance Engine (backend/aivara/crypto/)
+     ↓
+Database (backend/aivara/database/)
+     ↓
+Structured API Response
+```
+
+**Architectural Invariants:**
+1. **Zero Cryptographic Logic in Routes:** Route handlers contain no canonicalization, no SHA-256 hashing, no Ed25519 signing, no verification algorithms, no tamper classification, and no replay caches.
+2. **Authoritative Domain & Service Layer:** `ProvenanceService` coordinates persistence, database transactions, replay detection, verification delegating to `ProvenanceVerificationEngine`, and tamper detection delegating to `TamperDetector`.
+3. **No Database Leaks:** Internal SQLAlchemy ORM instances are never returned directly; all endpoints return typed Pydantic response models wrapped in standard API envelopes (`ApiResponse[T]` or `ApiErrorResponse`).
+
+### G.2 Exposed Endpoints & REST Semantics
+The API surface provides 13 focused endpoints:
+
+| Method | Path | Status Code | Purpose |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/provenance/records` | 201 Created | Atomically records a fully formed provenance event |
+| `POST` | `/api/v1/provenance/replay-check` | 200 OK | Non-mutating advisory replay check against DB |
+| `GET` | `/api/v1/provenance/records/{record_id}` | 200 OK | Retrieves single record by primary key UUID |
+| `GET` | `/api/v1/provenance/records` | 200 OK | Lists records with optional project filter and pagination |
+| `GET` | `/api/v1/provenance/chain/{project_id}` | 200 OK | Retrieves full chain for a project ordered by sequence ASC |
+| `POST` | `/api/v1/provenance/records/verify` | 200 OK | Cryptographically verifies caller-supplied record payload |
+| `GET` | `/api/v1/provenance/records/{record_id}/verify` | 200 OK | Verifies existing persisted record |
+| `POST` | `/api/v1/provenance/chain/verify` | 200 OK | Cryptographically verifies caller-supplied chain array |
+| `GET` | `/api/v1/provenance/chain/{project_id}/verify` | 200 OK | Verifies full persistent chain for a project |
+| `POST` | `/api/v1/provenance/records/tamper-assessment`| 200 OK | Evaluates caller-supplied record for tampering |
+| `GET` | `/api/v1/provenance/records/{record_id}/tamper-assessment` | 200 OK | Evaluates persisted record for tampering |
+| `POST` | `/api/v1/provenance/chain/tamper-assessment` | 200 OK | Evaluates caller-supplied chain array for tampering |
+| `GET` | `/api/v1/provenance/chain/{project_id}/tamper-assessment` | 200 OK | Evaluates persisted chain for tampering |
+
+### G.3 HTTP Status Semantics & Error Mapping
+HTTP status codes are applied deliberately to separate transport failures from analytical findings:
+
+1. **Cryptographic Invalidation != Transport Failure (HTTP 200 OK):**
+   When a caller requests `/records/verify` or `/chain/verify` on a record with a corrupted hash or invalid signature, the operation succeeded. The endpoint returns `200 OK` with a structured `UnifiedVerificationResult` detailing `overall_valid=False`, `signature_valid=False`, and specific `failures` (e.g. `RECORD_HASH_MISMATCH`, `INVALID_SIGNATURE`). It does NOT return a 500 server error.
+2. **Tampering Detection != Transport Failure (HTTP 200 OK):**
+   Similarly, tamper assessment endpoints return `200 OK` with a structured `TamperAssessment` detailing `tampering_detected=True`, `status="integrity_violation"`, confidence `1.0`, severity `HIGH`/`CRITICAL`, and specific tamper categories (e.g. `RECORD_PAYLOAD_TAMPERING`).
+3. **Authenticity Unavailable (HTTP 200 OK):**
+   If an unknown signer key is referenced, tamper assessment returns `200 OK` with `tampering_detected=False`, `status="authenticity_unavailable"`, and zero tamper findings.
+4. **Replay Rejection (HTTP 409 Conflict):**
+   State-mutating attempts to record duplicate events fail transactional uniqueness and return `HTTP 409 Conflict`. Handled via a centralized FastAPI exception handler in `backend/aivara/api/errors.py`, returning an `ApiErrorResponse` detailing `code` (`DUPLICATE_NONCE`, `DUPLICATE_SEQUENCE`, `DUPLICATE_RECORD`, `REPLAY_DETECTED`) and structured metadata (`replay_type`, `project_id`, `sequence_number`, `nonce`, `record_hash`).
+5. **Entity Not Found (HTTP 404 Not Found):**
+   Queries for nonexistent record IDs return `404 Not Found` with standardized `ApiErrorResponse` envelope.
+6. **Validation Failure (HTTP 422 Unprocessable Entity):**
+   Malformed payloads missing required fields or violating schema constraints return `422 Unprocessable Entity`.
+
+### G.4 Security, Confidentiality & Local-First Guarantees
+- **Offline / Local-Only Operation:** Zero outbound internet calls, telemetry, or remote dependencies.
+- **Zero Key Leaks:** Private key material and passphrases are never accepted or emitted by the API. Public keys are resolved locally via `KeyManager`.
+- **Zero Traceback Leaks:** Production exception handlers suppress Python tracebacks, file paths, and internal execution frames from HTTP responses.
+- **Transactional Rollback Safety:** Database sessions roll back cleanly on any insertion or uniqueness failure, guaranteeing zero partial rows.
+
+---
+
 *End of Cryptographic Design Specification*
+
 

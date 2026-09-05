@@ -499,6 +499,51 @@ class ProvenanceRecordRead(ProvenanceRecordBase):
 ProvenanceRecord = ProvenanceRecordRead
 
 
+class ReplayCheckRequest(BaseModel):
+    """Request payload for advisory replay checking."""
+
+    project_id: str = Field(..., description="Project identifier to test")
+    sequence_number: Optional[int] = Field(None, ge=0, description="Sequence number to test")
+    nonce: Optional[str] = Field(None, max_length=64, description="Nonce to test")
+    record_hash: Optional[str] = Field(None, max_length=64, description="Record hash to test")
+
+
+class RecordVerificationRequest(BaseModel):
+    """Request payload for single provenance record verification."""
+
+    record: Optional[Dict[str, Any]] = Field(None, description="In-memory provenance record payload to verify")
+    record_id: Optional[str] = Field(None, max_length=36, description="Database ID of a stored provenance record to verify")
+    expected_project_id: Optional[str] = Field(None, description="Optional expected project identifier")
+    expected_sequence: Optional[int] = Field(None, ge=0, description="Optional expected sequence number")
+    expected_previous_record_hash: Optional[str] = Field(None, max_length=64, description="Optional expected previous hash")
+    allow_unsigned: bool = Field(True, description="Whether unsigned records are permitted")
+
+
+class ChainVerificationRequest(BaseModel):
+    """Request payload for full provenance chain verification."""
+
+    project_id: Optional[str] = Field(None, description="Project identifier to load chain from database")
+    records: Optional[List[Dict[str, Any]]] = Field(None, description="Direct list of provenance records to verify")
+    allow_unsigned: bool = Field(True, description="Whether unsigned records are permitted")
+
+
+class RecordTamperAssessmentRequest(BaseModel):
+    """Request payload for assessing tampering on a single record."""
+
+    record: Optional[Dict[str, Any]] = Field(None, description="In-memory provenance record payload to assess")
+    record_id: Optional[str] = Field(None, max_length=36, description="Database ID of a stored provenance record to assess")
+    expected_project_id: Optional[str] = Field(None, description="Optional expected project identifier")
+    allow_unsigned: bool = Field(True, description="Whether unsigned records are permitted")
+
+
+class ChainTamperAssessmentRequest(BaseModel):
+    """Request payload for assessing tampering across a full chain."""
+
+    project_id: Optional[str] = Field(None, description="Project identifier to load chain from database")
+    records: Optional[List[Dict[str, Any]]] = Field(None, description="Direct list of provenance records to assess")
+    allow_unsigned: bool = Field(True, description="Whether unsigned records are permitted")
+
+
 # =====================================================================
 # Report
 # =====================================================================
