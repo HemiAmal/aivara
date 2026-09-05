@@ -12,12 +12,29 @@
 | **PHASE 1** | Environment Validation & Prerequisites Check | **COMPLETE** | 2026-08-31 |
 | **PHASE 2** | Repository Foundation & Minimal Backend Skeleton | **COMPLETE** | 2026-08-31 |
 | **PHASE 3** | Domain Model & Relational Database Schema Implementation | **COMPLETE** | 2026-09-01 |
-| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1, 4.2, 4.3 & 4.4 Complete) | In Progress |
+| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1–4.5 Complete) | In Progress |
 | **PHASE 4.1** | Cryptographic Provenance Engine Design Review | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.2** | Canonical Serialization Engine (RFC 8785 / JCS) | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.3** | SHA-256 Hashing Engine & Canonical Bridge | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.4** | Ed25519 Key Management Engine | **COMPLETE** | 2026-09-05 |
-| **PHASE 4.5+** | Provenance Signing, Chains, Nonces & Verification | **NOT STARTED** | Pending User Authorization |
+| **PHASE 4.5** | Digital Signatures & Signature Verification Engine | **COMPLETE** | 2026-09-05 |
+| **PHASE 4.6+** | Nonce, Sequence & Provenance Chain Verification | **NOT STARTED** | Pending User Authorization |
+
+---
+
+## Phase 4.5 Completed Deliverables
+- [x] Implemented dedicated `backend/aivara/crypto/signing.py` module for Ed25519 signing and verification.
+- [x] Defined exact signing input flow: provenance payload ➔ RFC 8785 JCS canonicalization ➔ SHA-256 digest (64 lowercase hex chars) ➔ 64 UTF-8 encoded bytes ➔ Ed25519 deterministic signature (RFC 8032).
+- [x] Implemented strict Base64 signature encoder and decoder enforcing exactly 64 raw bytes and 88-character formatted strings (`encode_signature`, `decode_signature`).
+- [x] Implemented `sign_hash()`, `sign_provenance_payload()`, and `sign_raw_bytes()` signing primitives.
+- [x] Enforced active-key signing policy: only `ACTIVE` keys may sign; `ROTATED`, `REVOKED`, and `EXPIRED` keys raise status-specific errors (`KeyRotatedError`, `KeyRevokedError`, `KeyExpiredError`).
+- [x] Implemented `verify_hash_signature()` and `verify_provenance_signature()` supporting historical verification with archived keys.
+- [x] Decoupled cryptographic validity (`is_valid: bool`) from current key authorization (`key_is_active: bool`).
+- [x] Implemented structured `VerificationResult` and `VerificationStatus` enum (`VALID`, `INVALID_SIGNATURE`, `MALFORMED_SIGNATURE`, `UNKNOWN_SIGNER_KEY`, `INVALID_SIGNING_INPUT`).
+- [x] Implemented assertion wrapper `assert_signature_valid()` raising typed exceptions.
+- [x] Defined signing and verification exception taxonomy (`SigningError`, `InvalidSigningInputError`, `SignatureVerificationError`, `MalformedSignatureError`, `InvalidSignatureError`, `UnknownSignerKeyError`).
+- [x] Created unit test suite `tests/test_signing.py` covering 28 comprehensive test cases across all required sections (28/28 passing).
+- [x] Verified full regression test suite across the entire project (172/172 tests passing).
 
 ---
 
