@@ -1,7 +1,7 @@
 # AIVARA — Cryptographic Provenance Engine Design Specification
 
-**Phase:** 4.1 — Design Review  
-**Status:** DESIGN REVIEW — Awaiting Approval  
+**Phase:** 4.6 — Nonce, Sequence & Hash-Linked Provenance Chain  
+**Status:** IMPLEMENTED & VERIFIED  
 **Date:** 2026-09-05  
 **Authors:** AIVARA Engineering  
 
@@ -1651,6 +1651,76 @@ sequenceDiagram
 ```
 
 **Then:** `record_hash = SHA-256(above bytes as UTF-8)`
+
+---
+
+## Appendix C: Phase 4.6 Implementation Specification (Nonce, Sequence & Chain)
+
+### C.1 Nonce Generation & Validation
+- **Source:** `secrets.token_hex(32).lower()` (Python standard library CSPRNG, drawing from OS entropy).
+- **Size:** 32 bytes (256 bits of entropy).
+- **Representation:** Lowercase hexadecimal string of exactly 64 ASCII characters (`^[0-9a-f]{64}$`).
+- **Uniqueness Scope:** Project-chain level (`project_id`). Reusing a nonce within a project is strictly rejected as a replay attempt (`DuplicateNonceError`).
+- **Security Invariants:**
+  - Nonces are NEVER derived from `random.random()`, timestamps, counters, or UUIDs.
+  - Nonces are public randomizers, not secret signing keys or passwords.
+  - Nonce validation (`validate_nonce`) strictly rejects uppercase letters, non-hex characters, and lengths other than 64.
+
+### C.2 Monotonic Sequence Numbers
+- **Scope:** Scoped strictly per project chain.
+- **Rule:** Genesis record is `sequence_number = 0`. Normal records begin at `sequence_number = 1` and increment strictly monotonically: `1, 2, 3, ...`.
+- **Integrity Constraints:**
+  - Non-negative integer (`>= 0`).
+  - Strict adjacency required during chain append (`expected_sequence = len(chain)`): sequence gaps raise `SequenceGapError`, duplicate or backward sequences raise `DuplicateSequenceError` or `InvalidSequenceError`.
+  - Sequence number is a protected canonical field participating in the record hash.
+
+### C.3 Genesis Record Design
+- **Sequence Number:** Strictly `0`.
+- **Previous Record Hash:** Fixed 64-character zero string (`"0" * 64` / `GENESIS_PREVIOUS_RECORD_HASH`).
+- **Genesis Nonce:** Deterministic project-bound anchor computed via `SHA-256(f"AIVARA_GENESIS_NONCE:{project_id}")`.
+- **Genesis Action/Actor:** `action="genesis"`, `actor="system"`, `record_type="project_genesis"`.
+- **Timestamp:** Deterministic epoch ISO timestamp (`1970-01-01T00:00:00Z`).
+- **First Normal Record:** Sequence `1` must have `previous_record_hash = genesis.record_hash`.
+
+### C.4 Previous-Record Hash Linking
+- Every record after genesis binds the exact SHA-256 digest of its immediate predecessor: `record[N].previous_record_hash == record[N-1].record_hash`.
+- Because `previous_record_hash` is part of the canonical payload, any downstream modification cascades and invalidates all subsequent record hashes and hash links.
+- Uses existing `canonicalize_provenance_payload()` and `hash_provenance_payload()` modules (no duplicate hashing algorithms).
+
+### C.5 Replay Detection Architecture
+Replay detection is enforced across three distinct layers within `ProvenanceChain`:
+1. **Nonce Layer:** Fast in-memory set tracking all nonces seen within the project. Attempted append with duplicate nonce raises `DuplicateNonceError`.
+2. **Sequence Layer:** Fast in-memory set tracking sequence numbers. Attempted append with duplicate sequence raises `DuplicateSequenceError`.
+3. **Record Hash Layer:** Fast in-memory set tracking record hashes. Attempted append with an identical record hash raises `DuplicateRecordError`.
+- **Scope & Limitations:** Replay detection in Phase 4.6 is in-memory within the crypto layer. It protects against replay attacks within a project chain in a single process. Cross-process / durable replay protection across system restarts will be backed by SQLite unique constraints and transaction locks when integrated in Phase 5.
+
+### C.6 Chain Verification & Decoupling
+- `verify_chain(records, key_manager=None, expected_project_id=None)` validates:
+  1. Chain non-emptiness.
+  2. Project consistency (all records match chain's `project_id`).
+  3. Genesis integrity (record 0 has sequence 0, `previous_record_hash == "0"*64`, action `genesis`).
+  4. Sequence ordering (monotonic `0, 1, 2, ...` with zero gaps).
+  5. Nonce format and project uniqueness.
+  6. Previous-record hash linking (`record[N].previous_record_hash == record[N-1].record_hash`).
+  7. Canonical record hash integrity (recomputed hash matches `record.record_hash`).
+  8. Digital signature validity (if signature is present, verified against Phase 4.4 `KeyManager` public key; unsigned records permitted during intermediate building).
+- **Chain Integrity vs. Key Lifecycle Status:** Chain integrity (`CHAIN_VALID`, `CHAIN_BROKEN`, `REPLAY_DETECTED`) evaluates hash links and payloads. Historical keys that are `ROTATED` or `REVOKED` can still verify historical signatures created when active, maintaining long-term archival validity without compromising current signing restrictions.
+
+### C.7 Exception & Status Taxonomy
+All chain-layer exceptions derive from `ChainError(AivaraException)`:
+- `InvalidProjectError`
+- `InvalidSequenceError`
+- `SequenceGapError`
+- `DuplicateSequenceError`
+- `InvalidNonceError`
+- `DuplicateNonceError`
+- `InvalidPreviousHashError`
+- `BrokenChainError`
+- `RecordHashMismatchError`
+- `DuplicateRecordError`
+- `ReplayDetectedError`
+
+Verification results are encapsulated in `ChainVerificationResult` with `ChainVerificationStatus` enum (`VALID`, `INVALID_PROJECT`, `GENESIS_INVALID`, `INVALID_SEQUENCE`, `SEQUENCE_GAP`, `INVALID_NONCE`, `REPLAY_DETECTED`, `CHAIN_BROKEN`, `RECORD_HASH_MISMATCH`, `INVALID_SIGNATURE`, `UNKNOWN_SIGNER_KEY`).
 
 ---
 
