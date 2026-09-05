@@ -1,6 +1,6 @@
 # AIVARA — Cryptographic Provenance Engine Design Specification
 
-**Phase:** 4.6 — Nonce, Sequence & Hash-Linked Provenance Chain  
+**Phase:** 4.10 — Cryptographic Tamper Detection Engine  
 **Status:** IMPLEMENTED & VERIFIED  
 **Date:** 2026-09-05  
 **Authors:** AIVARA Engineering  
@@ -1721,6 +1721,95 @@ All chain-layer exceptions derive from `ChainError(AivaraException)`:
 - `ReplayDetectedError`
 
 Verification results are encapsulated in `ChainVerificationResult` with `ChainVerificationStatus` enum (`VALID`, `INVALID_PROJECT`, `GENESIS_INVALID`, `INVALID_SEQUENCE`, `SEQUENCE_GAP`, `INVALID_NONCE`, `REPLAY_DETECTED`, `CHAIN_BROKEN`, `RECORD_HASH_MISMATCH`, `INVALID_SIGNATURE`, `UNKNOWN_SIGNER_KEY`).
+
+---
+
+## Appendix D: Phase 4.9 Implementation Specification (Unified Verification Engine)
+
+### D.1 Unified Verification Architecture
+The Phase 4.9 Verification Engine reconciles and composes all preceding cryptographic layers into a single cohesive interface without rewriting or duplicating existing algorithms:
+- **Canonical Serialization (RFC 8785 JCS):** `canonicalize_provenance_payload` from `aivara.crypto.canonical`.
+- **SHA-256 Hashing:** `hash_provenance_payload`, `is_valid_sha256`, `secure_compare_hashes` from `aivara.crypto.hashing`.
+- **Key Lifecycle Management:** `KeyManager`, `KeyStatus`, `validate_key_id` from `aivara.crypto.keys`.
+- **Digital Signatures:** `verify_hash_signature`, `verify_provenance_signature` from `aivara.crypto.signing`.
+- **Hash-Chain Linkage & Nonces:** `ChainRecord`, `ProvenanceChain`, genesis rules from `aivara.crypto.chain`.
+
+### D.2 Four Decoupled Verification Dimensions
+The verification engine explicitly decouples four independent dimensions of cryptographic evaluation:
+1. **Record Integrity (`record_valid: bool`):** Does the recomputed SHA-256 digest over the canonical RFC 8785 JCS payload match the record's stored `record_hash`?
+2. **Chain Integrity (`chain_valid: bool`):** Does the record correctly reference its predecessor's `record_hash` in a strictly monotonic, gapless sequence from a valid genesis anchor without nonce or hash replay?
+3. **Signature Authenticity (`signature_valid: Optional[bool]`):** Was the record's hash mathematically signed by the private key corresponding to `signer_key_id`? (Returns `None` if record is unsigned).
+4. **Key Lifecycle Status (`key_status: Optional[KeyStatus]`, `key_is_active: Optional[bool]`):** What is the administrative status of the signing key (`ACTIVE`, `ROTATED`, `REVOKED`, `EXPIRED`)?
+
+### D.3 Historical Signature Verification Policy
+Preserves the Phase 4.5 invariant:
+- Signatures created when a key was active remain **cryptographically valid** even after key state transitions to `ROTATED`, `REVOKED`, or `EXPIRED`.
+- The engine reports `signature_valid = True`, `overall_valid = True`, but accurately reflects `key_status = KeyStatus.ROTATED` / `REVOKED` / `EXPIRED` and `key_is_active = False`.
+- Administrative revocation or rotation does NOT retroactively invalidate historical mathematical proofs.
+
+### D.4 Multi-Failure Preservation
+When a record violates multiple verification layers (e.g. modified payload causing `RECORD_HASH_MISMATCH` and tampered signature causing `INVALID_SIGNATURE`), the engine collects **all** failures rather than short-circuiting and masking secondary errors.
+
+### D.5 Unsigned Record Policy
+- By default (`allow_unsigned = True`), unsigned records are permitted during intermediate pipeline stages; `signature_present = False` and `signature_valid = None` without generating an error.
+- When strict signing is enforced (`allow_unsigned = False`), an unsigned record produces a `MISSING_SIGNATURE` failure.
+
+### D.6 Failure Taxonomy & Evidence
+- **Structured Failures (`VerificationFailure`):** Machine-readable `code` (`FailureCode`), human-readable `message`, `layer` (`INPUT`, `RECORD`, `CHAIN`, `SIGNATURE`, `KEY`), `field`, and `sequence_number`.
+- **Machine-Readable Evidence (`VerificationEvidence`):** Captures non-sensitive diagnostic parameters (`stored_record_hash`, `computed_record_hash`, `sequence_number`, `expected_sequence`, `stored_previous_record_hash`, `expected_previous_record_hash`, `signer_key_id`, `key_status`, `key_is_active`). Private keys and passphrases are strictly excluded.
+
+---
+
+## Appendix E: Phase 4.10 Implementation Specification (Tamper Detection Engine)
+
+### E.1 Architecture & Separation Principle
+Tamper detection resides downstream of the verification engine:
+```
+canonical.py ➔ hashing.py ➔ keys.py ➔ signing.py ➔ chain.py ➔ verification.py ➔ tamper_detection.py
+```
+It strictly operates on pre-computed `UnifiedVerificationResult` and `UnifiedChainVerificationResult` instances without repeating canonicalization, hashing, signature verification, or chain verification.
+
+**Core Invariant:** `VERIFICATION FAILURE != AUTOMATIC PROOF OF MALICIOUS TAMPERING`
+- Cryptographic failure proves mathematical divergence, not human intent or malicious motivation.
+- Reports objectively state: `"Cryptographic integrity violation detected"` and never claim `"Malicious attacker detected"`.
+
+### E.2 Four-Class Assessment Taxonomy
+Every evaluation classifies the subject into one of four mutually exclusive states:
+1. **`INTEGRITY_VIOLATION` (`tampering_detected = True`, `confidence = 1.0`):**
+   Deterministic mathematical evidence of record modification, corrupted signature, broken hash link, sequence manipulation, or genesis alteration.
+2. **`AUTHENTICITY_UNAVAILABLE` (`tampering_detected = False`, `confidence = 0.0`):**
+   Signer key is unknown or signature is absent under strict policy. Authenticity cannot be established, but tampering is NOT proved.
+3. **`UNVERIFIABLE_INPUT` (`tampering_detected = False`, `confidence = 0.0`):**
+   Input is structurally malformed, unparseable, or schema-invalid. Because input could not be parsed, integrity could not be evaluated.
+4. **`CLEAN` (`tampering_detected = False`, `confidence = 0.0`):**
+   All cryptographic verification checks pass without discrepancies.
+
+### E.3 Tamper Categories
+The detector maps low-level `FailureCode`s into standardized domain categories:
+- **`RECORD_PAYLOAD_TAMPERING`:** Canonical payload does not match stored `record_hash` (`RECORD_HASH_MISMATCH`).
+- **`RECORD_HASH_TAMPERING`:** Record hash does not match computed canonical hash.
+- **`SIGNATURE_TAMPERING`:** Ed25519 digital signature fails mathematical verification (`INVALID_SIGNATURE`).
+- **`CHAIN_TAMPERING`:** Broken `previous_record_hash` link, duplicate nonces, or duplicate records (`BROKEN_CHAIN`, `DUPLICATE_NONCE`, `DUPLICATE_RECORD`).
+- **`SEQUENCE_TAMPERING`:** Sequence numbering gaps, duplicates, or non-monotonic transitions (`SEQUENCE_VIOLATION`, `SEQUENCE_GAP`, `DUPLICATE_SEQUENCE`).
+- **`GENESIS_TAMPERING`:** Genesis record violates defined immutable properties or `"0"*64` anchor (`GENESIS_INVALID`).
+- **`PROJECT_CONTEXT_TAMPERING`:** Record from another project context substituted into chain (`PROJECT_CONTEXT_TAMPERING`).
+
+### E.4 False-Positive Protection
+The following are explicitly protected against false-positive tampering classifications:
+1. Malformed input / unparseable JSON (`UNVERIFIABLE_INPUT`).
+2. Invalid schema / bad types (`UNVERIFIABLE_INPUT`).
+3. Unknown signer key not in local keyring (`AUTHENTICITY_UNAVAILABLE`).
+4. Unsigned records under permissive policy (`CLEAN`).
+5. Valid historical signatures from `ROTATED` keys (`CLEAN`).
+6. Valid historical signatures from `REVOKED` keys (`CLEAN`).
+7. Valid historical signatures from `EXPIRED` keys (`CLEAN`).
+8. Monotonic clock warnings (`CLEAN`).
+
+### E.5 Severity Taxonomy
+- **`CRITICAL`:** Genesis integrity violations, chain-wide structural compromises.
+- **`HIGH`:** Record hash mismatches, invalid signatures, broken chain links.
+- **`MEDIUM`:** Sequence gaps or project-context mismatches.
+- **`NONE`:** Clean records, unverifiable inputs, or unestablished authenticity.
 
 ---
 

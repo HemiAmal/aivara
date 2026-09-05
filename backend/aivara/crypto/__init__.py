@@ -104,6 +104,29 @@ from aivara.crypto.chain import (
     validate_nonce,
     verify_chain,
 )
+from aivara.crypto.verification import (
+    FailureCode,
+    ProvenanceVerificationEngine,
+    UnifiedChainVerificationResult,
+    UnifiedVerificationResult,
+    VerificationEngineError,
+    VerificationEvidence,
+    VerificationFailure,
+    verify_provenance_chain,
+    verify_record,
+)
+from aivara.crypto.tamper_detection import (
+    ChainTamperAssessment,
+    TamperAssessment,
+    TamperAssessmentStatus,
+    TamperCategory,
+    TamperDetector,
+    TamperEvidence,
+    TamperFinding,
+    TamperSeverity,
+    assess_chain_tampering,
+    assess_record_tampering,
+)
 
 __all__ = [
     # Canonicalization (Phase 4.2)
@@ -205,4 +228,25 @@ __all__ = [
     "ChainVerificationResult",
     "ProvenanceChain",
     "verify_chain",
+    # Unified Verification Engine (Phase 4.9)
+    "VerificationEngineError",
+    "FailureCode",
+    "VerificationFailure",
+    "VerificationEvidence",
+    "UnifiedVerificationResult",
+    "UnifiedChainVerificationResult",
+    "ProvenanceVerificationEngine",
+    "verify_record",
+    "verify_provenance_chain",
+    # Tamper Detection (Phase 4.10)
+    "TamperAssessmentStatus",
+    "TamperCategory",
+    "TamperSeverity",
+    "TamperEvidence",
+    "TamperFinding",
+    "TamperAssessment",
+    "ChainTamperAssessment",
+    "TamperDetector",
+    "assess_record_tampering",
+    "assess_chain_tampering",
 ]
