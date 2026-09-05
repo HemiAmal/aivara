@@ -28,6 +28,26 @@ from aivara.crypto.hashing import (
     sha256_bytes,
     sha256_text,
 )
+from aivara.crypto.keys import (
+    CorruptedKeyError,
+    Ed25519KeyHandle,
+    InvalidKeyIdError,
+    InvalidPassphraseError,
+    KeyExistsError,
+    KeyExpiredError,
+    KeyManagementError,
+    KeyManager,
+    KeyMetadata,
+    KeyNotFoundError,
+    KeyRevokedError,
+    KeyRotatedError,
+    KeySecurityError,
+    KeyStatus,
+    KeyStatusError,
+    PassphraseRequiredError,
+    derive_key_id,
+    validate_key_id,
+)
 
 __all__ = [
     # Canonicalization (Phase 4.2)
@@ -56,4 +76,23 @@ __all__ = [
     "secure_compare_hashes",
     "hash_canonical_data",
     "hash_provenance_payload",
+    # Key Management (Phase 4.4)
+    "KeyStatus",
+    "KeyMetadata",
+    "Ed25519KeyHandle",
+    "KeyManager",
+    "KeyManagementError",
+    "KeyStatusError",
+    "KeyNotFoundError",
+    "KeyExistsError",
+    "InvalidKeyIdError",
+    "CorruptedKeyError",
+    "KeyRevokedError",
+    "KeyRotatedError",
+    "KeyExpiredError",
+    "KeySecurityError",
+    "PassphraseRequiredError",
+    "InvalidPassphraseError",
+    "derive_key_id",
+    "validate_key_id",
 ]

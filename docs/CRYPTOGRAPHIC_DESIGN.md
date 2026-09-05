@@ -432,142 +432,145 @@ The Ed25519 signing input is exactly the **32 raw bytes of the record hash** (de
 
 ---
 
-## 8. Key Management
+## 8. Key Management Engine (Phase 4.4 Implementation)
 
-### 8.1 Key Hierarchy
+### 8.1 Key Hierarchy & Directory Layout
+
+To avoid write-contention and file corruption issues of a monolithic keyring file, key material and metadata are stored atomically per key ID in the dedicated keys directory (`data/keys/`):
 
 ```
 data/
 └── keys/
-    ├── active/
-    │   ├── aivara_signing.key          # Private key (current)
-    │   └── aivara_signing.pub          # Public key (current)
-    ├── revoked/
-    │   ├── <key_id>_<revoked_date>.pub # Archived public keys
-    │   └── ...
-    └── keyring.json                    # Key metadata registry
+    ├── .gitkeep                         # Track directory structure
+    ├── active_key_id                    # Plain text containing active key_id (64 hex chars)
+    ├── <key_id>.key                     # PKCS#8 PEM private key (restricted ACL / 0600)
+    ├── <key_id>.pub                     # SubjectPublicKeyInfo PEM public key
+    ├── <key_id>.json                    # KeyMetadata JSON schema (RFC 8785 canonical format)
+    └── ...                              # Historical (rotated / revoked) keys retained
 ```
 
-### 8.2 Key Generation
+### 8.2 Key Generation & Key ID Derivation
 
-| Parameter | Value |
-|-----------|-------|
-| Algorithm | Ed25519 |
-| Private key size | 32 bytes (seed) + 32 bytes (public) = 64 bytes total |
-| Public key size | 32 bytes |
-| Key ID | `SHA-256(public_key_bytes)[:16]` — first 16 hex characters |
-| Generation | `Ed25519PrivateKey.generate()` from `cryptography` library |
-| Trigger | First startup if no key exists, or explicit `POST /api/v1/provenance/keys/initialize` |
+| Parameter | Value | Details |
+|-----------|-------|---------|
+| **Algorithm** | Ed25519 (RFC 8032) | High-speed, high-security Edwards-curve digital signature algorithm |
+| **Private Key Size** | 32 bytes seed (64 bytes expanded) | PKCS#8 unencrypted or encrypted with AES-256-CBC |
+| **Public Key Size** | 32 bytes raw | Stored in SubjectPublicKeyInfo PEM format + base64 in metadata |
+| **Key Identifier (key_id)** | Full 64-character lowercase hex digest | Derived deterministically as `SHA-256(raw_32_byte_public_key)` |
+| **Format Enforcement** | `^[0-9a-f]{64}$` regex validation | Bounded length matches SQLite `VARCHAR(64)` and eliminates directory traversal |
+| **Generator** | `Ed25519PrivateKey.generate()` | Cryptographically secure random generation via `cryptography` library |
 
-### 8.3 Key Storage
+**Key ID Determinism Invariant:**
+```
+raw_pub = public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
+key_id  = sha256_bytes(raw_pub)  # Exact 64 hex characters
+```
 
-**Private key file (`aivara_signing.key`):**
+### 8.3 Key Storage & Local Filesystem Security
 
-| Aspect | Specification |
-|--------|---------------|
-| Format | PEM (PKCS8) |
-| Encryption at rest | **Unencrypted in v1** (single-user desktop). Optional passphrase encryption (PBKDF2 + AES-GCM) in future. |
-| File permissions | `0600` (owner read/write only) on Unix. ACL-restricted on Windows. |
-| Location | `data/keys/active/aivara_signing.key` |
+**Private Key Security (`<key_id>.key`):**
+- **Encoding:** Standard PKCS#8 encrypted PEM format (`BEGIN ENCRYPTED PRIVATE KEY`).
+- **Mandatory Encryption at Rest:** By default and in production, newly generated persistent private keys are strictly encrypted using standard PKCS#8 `serialization.BestAvailableEncryption(passphrase.encode("utf-8"))` (AES-256-CBC / scrypt / PBKDF2).
+- **Passphrase Responsibility:** The passphrase is the sole responsibility of the operator and cannot be recovered by AIVARA. If a passphrase is not supplied or is empty, key generation immediately fails with `PassphraseRequiredError`. No fallback to plaintext storage is ever permitted.
+- **Credential Storage Invariants:** The passphrase is never stored in SQLite, never logged, never hardcoded, never cached in memory beyond immediate use, and never returned in API responses.
+- **Filesystem Permissions:**
+  - **Windows (NTFS):** Configured via `icacls` sub-process:
+    ```cmd
+    icacls <filepath> /inheritance:r /grant:r %USERNAME%:(R,W)
+    ```
+    Inheritance is severed, granting read/write exclusively to the current operating system user.
+  - **POSIX:** Configured via `os.chmod(filepath, 0o600)` granting read/write only to file owner.
+- **Atomic File Writes:** Key files are written to a `.tmp` file in the same directory, flushed with `os.fsync`, permissions applied, and atomically moved into place via `os.replace`.
 
-**Public key file (`aivara_signing.pub`):**
+**Public Key Storage (`<key_id>.pub`):**
+- **Encoding:** SubjectPublicKeyInfo (SPKI) PEM format (`BEGIN PUBLIC KEY`).
+- **Access:** Shared/readable for signature verification.
 
-| Aspect | Specification |
-|--------|---------------|
-| Format | PEM (SubjectPublicKeyInfo) |
-| Permissions | `0644` (world-readable) |
-| Location | `data/keys/active/aivara_signing.pub` |
+### 8.4 Key Metadata Schema (`<key_id>.json`)
 
-### 8.4 Key Metadata Registry (`keyring.json`)
+Key metadata is strictly validated using Pydantic (`KeyMetadata`):
 
 ```json
 {
-    "schema_version": "1",
-    "keys": [
-        {
-            "key_id": "a1b2c3d4e5f60718",
-            "algorithm": "Ed25519",
-            "created_at": "2026-09-05T12:00:00Z",
-            "status": "active",
-            "public_key_pem_path": "active/aivara_signing.pub",
-            "public_key_b64": "<base64-encoded raw public key bytes>"
-        }
-    ]
+  "key_id": "a3f8c9e2b104...",
+  "algorithm": "Ed25519",
+  "created_at": "2026-09-05T12:00:00Z",
+  "status": "ACTIVE",
+  "public_key_hex": "e3b0c44298fc...",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCow...",
+  "revoked_at": null,
+  "revocation_reason": null
 }
 ```
 
-### 8.5 Key Security Rules
+### 8.5 Key Security Invariants & Encapsulation
 
-| Rule | Enforcement |
-|------|-------------|
-| Private key MUST NOT be hardcoded | Code review, no key material in source |
-| Private key MUST NOT be committed to Git | `.gitignore` entry for `data/keys/` |
-| Private key MUST NOT be stored in database rows | Architecture enforcement — key files only |
-| Private key MUST NOT appear in logs | Logging sanitization filter (already implemented in `core/logging.py`) |
-| Private key MUST NOT appear in API responses | Schema validation — no key material in Pydantic response models |
-| Public key MAY appear in API responses | Included in verification responses for transparency |
+| Security Invariant | Enforcement Mechanism |
+|--------------------|------------------------|
+| **No Plaintext at Rest** | Persistent keys are strictly encrypted with PKCS#8 `BestAvailableEncryption` |
+| **No Hardcoded Keys** | Keys exist exclusively in local filesystem storage or test fixtures |
+| **No Version Control Leaks** | Root `.gitignore` explicitly ignores `data/keys/*` while preserving `!data/keys/.gitkeep` |
+| **No In-Memory Exposure** | `Ed25519KeyHandle` wraps private keys; `__repr__` and `__str__` mask private key material (`<Ed25519KeyHandle key_id=... status=...>`) |
+| **No Database Leaks** | Private keys and passphrases are never persisted in database columns |
+| **No Log / API Leaks** | Sensitive sanitization filter in `core/logging.py` redacts PEM patterns and passphrases |
+| **No Path Traversal** | Key IDs are strictly checked against `^[0-9a-f]{64}$` before forming file paths |
 
-### 8.6 Key Rotation
+### 8.6 Key Lifecycle & Status Semantics
 
-Key rotation creates a new keypair while preserving the old public key for historical verification.
-
-**Rotation process:**
+A key follows a formal finite state machine with statuses defined by `KeyStatus`:
 
 ```
-[1] Generate new Ed25519 keypair
-        │
-[2] Assign new key_id = SHA-256(new_public_key)[:16]
-        │
-[3] Move current active key pair to revoked/ directory
-    Rename: <old_key_id>_<revocation_date>.pub
-        │
-[4] Install new keypair in active/ directory
-        │
-[5] Update keyring.json:
-    - Old key: status = "rotated", rotated_at = <now>
-    - New key: status = "active", created_at = <now>
-        │
-[6] Create a provenance record of type "key_rotation"
-    signed with the OLD key, referencing the new key_id
-        │
-[7] Next provenance record is signed with the NEW key
+               ┌───────────┐
+               │  ACTIVE   │
+               └─────┬─────┘
+                     │
+         ┌───────────┴───────────┐
+         ▼                       ▼
+   ┌───────────┐           ┌───────────┐
+   │  ROTATED  │           │  REVOKED  │
+   └─────┬─────┘           └───────────┘
+         │                       ▲
+         └───────────────────────┘
 ```
 
-**Key rotation produces a special provenance record:**
+1. **`ACTIVE`:** Valid for signing new records and historical verification. Exactly one active key is designated in `active_key_id`. Evaluates `handle.is_active == True` and `handle.can_sign == True`.
+2. **`ROTATED`:** Deprecated for new signatures, but retained for historical verification of past records. When an operation requires an active key, raises `KeyRotatedError` (code: `KEY_ROTATED`). Evaluates `handle.is_rotated == True` and `handle.can_sign == False`.
+3. **`REVOKED`:** Invalided permanently due to compromise or retirement. When an operation requires an active key, raises `KeyRevokedError` (code: `KEY_REVOKED`). Evaluates `handle.is_revoked == True` and `handle.can_sign == False`.
+4. **`EXPIRED`:** Beyond validity timeline. When an operation requires an active key, raises `KeyExpiredError` (code: `KEY_EXPIRED`). Evaluates `handle.is_expired == True` and `handle.can_sign == False`.
 
-```json
-{
-    "record_type": "key_rotation",
-    "action": "rotate_signing_key",
-    "metadata_json": {
-        "old_key_id": "a1b2c3d4e5f60718",
-        "new_key_id": "f8e7d6c5b4a39281",
-        "reason": "scheduled_rotation"
-    }
-}
+**Status Error Hierarchy:**
+```
+KeyManagementError
+  └── KeyStatusError
+        ├── KeyRevokedError (code: KEY_REVOKED)
+        ├── KeyRotatedError (code: KEY_ROTATED)
+        └── KeyExpiredError (code: KEY_EXPIRED)
 ```
 
-This record is signed with the **old key**, creating a cryptographic handoff.
+**Historical Loading Policy:**
+When loading keys for historical provenance verification (`require_active=False`), all key statuses (`ACTIVE`, `ROTATED`, `REVOKED`, `EXPIRED`) remain loadable and verifiable indefinitely.
 
-### 8.7 Key Revocation
+### 8.7 Key Rotation & Revocation Architecture
 
-A key can be revoked (e.g., suspected compromise). Revoked keys:
-
-- Are moved to `revoked/` directory
-- Have `status: "revoked"` in `keyring.json`
-- Can still be used for **historical verification** (to verify records signed before revocation)
-- MUST NOT be used for new signatures
-- Revocation produces a provenance record signed with the revoked key (if still available) or with a replacement key
+- **`rotate_key(passphrase=...)`:**
+  - Atomically marks the active key as `KeyStatus.ROTATED`.
+  - Generates a new encrypted Ed25519 keypair with the provided passphrase and assigns it `KeyStatus.ACTIVE`.
+  - Updates `active_key_id` pointer atomically.
+  - Returns `(old_key_handle, new_key_handle)` for cryptographic handoff (Phase 4.5/4.6).
+- **`revoke_key(key_id, reason=...)`:**
+  - Sets key status to `KeyStatus.REVOKED`, records `revoked_at = utcnow()` and `revocation_reason`.
+  - If the revoked key was active, clears `active_key_id`.
+- **Historical Retention:** Historical keys are never deleted, ensuring that historical provenance chains can always be verified indefinitely.
 
 ### 8.8 Development vs. Production Key Handling
 
-| Aspect | Development | Production |
-|--------|-------------|------------|
-| Key generation | Auto-generated on first startup | Explicit initialization via API or CLI script |
-| Key encryption | None (unencrypted PEM) | Optional passphrase encryption |
-| Key persistence | Ephemeral (test fixtures use in-memory keys) | File-based with restrictive permissions |
-| Key rotation | Manual | Recommended on a schedule or after personnel change |
-| Key backup | Not required | Offline backup recommended |
+| Aspect | Development / Testing | Production |
+|--------|-----------------------|------------|
+| Key generation | Explicit test passphrases in temporary directories | Operator-supplied passphrase via secure prompt / CLI |
+| Key encryption | Standard encrypted PKCS#8 (`BestAvailableEncryption`) | Standard encrypted PKCS#8 (`BestAvailableEncryption`) |
+| Key persistence | Temporary directory (`tmp_path`) | Local `data/keys/` with restrictive ACL / 0600 |
+| Plaintext fallback | Prohibited | Prohibited |
+| Key rotation | Verified via test automation | Operator-triggered rotation |
 
 ---
 

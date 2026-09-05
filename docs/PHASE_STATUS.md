@@ -1,6 +1,6 @@
 # AIVARA — Phase Status Tracking
 
-**Last Updated:** 2026-09-01  
+**Last Updated:** 2026-09-05  
 
 ---
 
@@ -12,11 +12,33 @@
 | **PHASE 1** | Environment Validation & Prerequisites Check | **COMPLETE** | 2026-08-31 |
 | **PHASE 2** | Repository Foundation & Minimal Backend Skeleton | **COMPLETE** | 2026-08-31 |
 | **PHASE 3** | Domain Model & Relational Database Schema Implementation | **COMPLETE** | 2026-09-01 |
-| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1, 4.2 & 4.3 Complete) | In Progress |
+| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1, 4.2, 4.3 & 4.4 Complete) | In Progress |
 | **PHASE 4.1** | Cryptographic Provenance Engine Design Review | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.2** | Canonical Serialization Engine (RFC 8785 / JCS) | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.3** | SHA-256 Hashing Engine & Canonical Bridge | **COMPLETE** | 2026-09-05 |
-| **PHASE 4.4+** | Cryptographic Provenance Implementation (Signatures, Chains, Nonces) | **NOT STARTED** | Pending User Authorization |
+| **PHASE 4.4** | Ed25519 Key Management Engine | **COMPLETE** | 2026-09-05 |
+| **PHASE 4.5+** | Provenance Signing, Chains, Nonces & Verification | **NOT STARTED** | Pending User Authorization |
+
+---
+
+## Phase 4.4 Completed Deliverables
+- [x] Integrated `cryptography>=43.0.0` dependency (`cryptography==50.0.1` installed in offline `.venv`).
+- [x] Secured keys directory (`data/keys/`) in root `.gitignore` (`data/keys/*`, `!data/keys/.gitkeep`) verified via `git check-ignore`.
+- [x] Configured `keys_dir` property and automatic directory creation in `backend/aivara/core/config.py`.
+- [x] Implemented dedicated `backend/aivara/crypto/keys.py` module for Ed25519 key lifecycle management.
+- [x] Implemented deterministic 64-character lowercase hex Key ID derivation: `SHA-256(raw_32_byte_public_key)`.
+- [x] Implemented mandatory private key encryption at rest by default using standard PKCS#8 `BestAvailableEncryption` (AES-256-CBC) with zero plaintext fallback.
+- [x] Implemented SubjectPublicKeyInfo (SPKI) PEM public key persistence and canonical JSON metadata.
+- [x] Implemented atomic file writing (`_atomic_write_file`) with temporary staging, `fsync`, and atomic rename.
+- [x] Implemented OS-specific access control (`icacls` on Windows granting exclusive `(R,W)` to current user, `0600` on POSIX).
+- [x] Implemented `KeyStatus` enum (`ACTIVE`, `ROTATED`, `REVOKED`, `EXPIRED`) and Pydantic `KeyMetadata` schema.
+- [x] Implemented `Ed25519KeyHandle` wrapper exposing state flags (`is_active`, `is_rotated`, `is_revoked`, `is_expired`, `can_sign`) and preventing accidental exposure of private key material in logs or `__repr__`.
+- [x] Implemented status-specific error semantics separating `KeyRevokedError`, `KeyRotatedError`, and `KeyExpiredError` under `KeyStatusError`.
+- [x] Implemented `KeyManager` lifecycle operations: `generate_key`, `load_key`, `get_active_key`, `rotate_key`, `revoke_key`, and `list_keys`.
+- [x] Implemented defense-in-depth path traversal checks validating `key_id` against `^[0-9a-f]{64}$`.
+- [x] Defined complete key management exception hierarchy (`KeyManagementError`, `KeyStatusError`, `KeyRevokedError`, `KeyRotatedError`, `KeyExpiredError`, `PassphraseRequiredError`, `InvalidPassphraseError`, `KeyNotFoundError`, `KeyExistsError`, `InvalidKeyIdError`, `CorruptedKeyError`, `KeySecurityError`).
+- [x] Created unit test suite `tests/test_keys.py` with 30 comprehensive test cases covering Tests 1 to 23, mandatory encryption at rest, passphrase validation, status-specific error semantics, path traversal, and historical access (30/30 passing).
+- [x] Verified full regression test suite across the entire project (144/144 tests passing).
 
 ---
 

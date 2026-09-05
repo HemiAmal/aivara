@@ -15,6 +15,7 @@ def test_default_configuration_paths(tmp_path):
     assert "sqlite:///" in test_settings.database_url
     assert test_settings.model_cache_dir == tmp_path / "data" / "model_cache"
     assert test_settings.report_dir == tmp_path / "data" / "reports"
+    assert test_settings.keys_dir == tmp_path / "data" / "keys"
 
 
 def test_ensure_directories_creates_all_subdirs(tmp_path):
@@ -29,3 +30,4 @@ def test_ensure_directories_creates_all_subdirs(tmp_path):
     assert (tmp_path / "data" / "reports").exists()
     assert (tmp_path / "data" / "temp").exists()
     assert (tmp_path / "data" / "provenance").exists()
+    assert (tmp_path / "data" / "keys").exists()

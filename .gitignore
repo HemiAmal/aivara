@@ -61,3 +61,5 @@ data/temp/*
 !data/temp/.gitkeep
 data/provenance/*
 !data/provenance/.gitkeep
+data/keys/*
+!data/keys/.gitkeep

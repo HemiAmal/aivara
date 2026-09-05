@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     def provenance_dir(self) -> Path:
         return self.data_dir / "provenance"
 
+    @property
+    def keys_dir(self) -> Path:
+        return self.data_dir / "keys"
+
     def ensure_directories(self) -> None:
         """Ensure all required local data storage directories exist."""
         for directory in [
@@ -86,6 +90,7 @@ class Settings(BaseSettings):
             self.report_dir,
             self.temp_dir,
             self.provenance_dir,
+            self.keys_dir,
         ]:
             directory.mkdir(parents=True, exist_ok=True)
 
