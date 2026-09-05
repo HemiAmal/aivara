@@ -71,6 +71,9 @@ from aivara.domain.schemas import (
     AuditEventCreate,
     AuditEventRead,
     AuditEvent,
+    AuditChainVerificationRequest,
+    AuditVerificationFailure,
+    AuditVerificationResult,
     # Provenance Record
     ProvenanceRecordBase,
     ProvenanceRecordCreate,
@@ -103,6 +106,7 @@ __all__ = [
     "EvidenceBase", "EvidenceCreate", "EvidenceRead", "Evidence",
     "RiskAssessmentBase", "RiskAssessmentCreate", "RiskAssessmentRead", "RiskAssessment",
     "AuditEventBase", "AuditEventCreate", "AuditEventRead", "AuditEvent",
+    "AuditChainVerificationRequest", "AuditVerificationFailure", "AuditVerificationResult",
     "ProvenanceRecordBase", "ProvenanceRecordCreate", "ProvenanceRecordRead", "ProvenanceRecord",
     "ReplayCheckRequest", "RecordVerificationRequest", "ChainVerificationRequest",
     "RecordTamperAssessmentRequest", "ChainTamperAssessmentRequest",

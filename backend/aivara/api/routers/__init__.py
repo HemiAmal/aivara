@@ -11,6 +11,7 @@ from aivara.api.routers import (
     evidence,
     risk,
     provenance,
+    audit,
     reports,
     attack_lab,
 )
@@ -26,5 +27,6 @@ api_v1_router.include_router(findings.router)
 api_v1_router.include_router(evidence.router)
 api_v1_router.include_router(risk.router)
 api_v1_router.include_router(provenance.router)
+api_v1_router.include_router(audit.router)
 api_v1_router.include_router(reports.router)
 api_v1_router.include_router(attack_lab.router)

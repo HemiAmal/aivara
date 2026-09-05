@@ -1946,6 +1946,86 @@ HTTP status codes are applied deliberately to separate transport failures from a
 
 ---
 
+## Appendix H: Phase 4.13 Implementation Specification (Cryptographically Tamper-Evident Audit Logging)
+
+### H.1 Architectural Philosophy: Dual-Layer Immutability
+Phase 4.13 introduces a cryptographically tamper-evident audit logging layer designed to preserve an incontrovertible historical record of security-relevant operations within AIVARA.
+
+AIVARA explicitly separates and enforces two complementary immutability layers:
+1. **Application-Level Defense-in-Depth:**
+   In-process SQLAlchemy `before_update` and `before_delete` event listeners on `AuditEventModel` intercept and reject any programmatic attempts to modify or delete audit rows, raising `AuditImmutabilityError`.
+2. **Authoritative Cryptographic Tamper-Evidence:**
+   The fundamental security guarantee does NOT rely on application or ORM code. If an attacker or rogue script directly manipulates the SQLite database file using raw SQL (bypassing the ORM), the continuous hash linkage is mathematically broken. The audit verification engine recomputes canonical hashes and linkage digests, immediately reporting `AUDIT_INTEGRITY_VIOLATION`.
+
+### H.2 Strict 13-Field Protected Audit Hash Schema
+To prevent field injection, dynamic attribute tampering, or parser ambiguities, the audit hash input binds strictly and exclusively 13 explicit fields:
+```json
+{
+  "_schema_version": "1.0",
+  "action": "RECORD_PROVENANCE",
+  "actor": "system",
+  "description": "Provenance record 1 recorded successfully.",
+  "event_type": "PROVENANCE_RECORDED",
+  "metadata": {
+    "nonce": "...",
+    "record_hash": "...",
+    "sequence_number": 1
+  },
+  "outcome": "SUCCESS",
+  "previous_event_hash": "...",
+  "project_id": "...",
+  "sequence_number": 1,
+  "target_id": "...",
+  "target_type": "PROVENANCE_RECORD",
+  "timestamp": "2026-09-05T12:00:00.000000Z"
+}
+```
+**Canonicalization Invariants:**
+- Null values are explicitly preserved as JSON `null`.
+- Metadata is represented as structured JSON and canonicalized deterministically via RFC 8785 (`validate_canonical_data` + `canonicalize`).
+- Content digest is calculated as `SHA-256(canonical_bytes)` producing a 64-character lowercase hexadecimal string.
+
+### H.3 Deterministic Genesis Anchor & Project-Scoped Monotonic Sequences
+In alignment with `AuditEventModel.project_id` being a non-nullable Foreign Key, audit chains are strictly project-scoped:
+- **Genesis Record (Sequence 0):**
+  Each project chain is rooted in a deterministic genesis anchor with:
+  - `sequence_number = 0`
+  - `previous_event_hash = "0" * 64`
+  - `event_type = "AUDIT_GENESIS"`
+  - `actor = "AIVARA_SYSTEM"`
+  - `action = "INITIALIZE_AUDIT_CHAIN"`
+  - `target_type = "AUDIT_CHAIN"`
+  - `timestamp = "1970-01-01T00:00:00Z"`
+  - `metadata = {"audit_genesis": true}`
+- **Subsequent Events (Sequences 1, 2, 3...):**
+  Monotonically incrementing without gaps. Database unique compound indexes `(project_id, sequence_number)` and `(project_id, event_hash)` authoritatively prevent fork attacks and duplicate entries.
+
+### H.4 Independent Replay Audit Transactions
+When an invalid provenance submission is rejected due to a replay collision (`DUPLICATE_NONCE`, `DUPLICATE_SEQUENCE`, `DUPLICATE_RECORD`):
+1. The business transaction encounters an `IntegrityError` and rolls back (`db.rollback()`).
+2. To ensure that the record of the rejected replay attack survives and cannot be discarded by the rollback, `AuditService.record_replay_rejected()` opens an isolated session bound to the database engine and commits `PROVENANCE_REPLAY_REJECTED` in an independent transaction.
+
+### H.5 Observable Audit Failure Semantics
+AIVARA explicitly distinguishes:
+- `BUSINESS_OPERATION_SUCCESS + AUDIT_SUCCESS`
+- `BUSINESS_OPERATION_SUCCESS + AUDIT_FAILURE`
+
+If an audit event cannot be persisted due to a storage failure, the failure is logged as a critical security condition and recorded on `ProvenanceService.last_audit_error`. Audit failures are never silently swallowed, and fictitious audit events are never fabricated.
+
+### H.6 Recursion Prevention
+`AuditService` acts strictly as an observer at the service boundary. `AuditService.record_event()` records the audit event and immediately commits without invoking secondary auditing routines or firing circular event listeners.
+
+### H.7 Read-Only REST API
+All audit HTTP endpoints under `/api/v1/audit` are strictly read-only:
+- `GET /api/v1/audit/events/{id}`
+- `GET /api/v1/audit/events`
+- `GET /api/v1/audit/chain/{project_id}`
+- `POST /api/v1/audit/chain/verify`
+- `GET /api/v1/audit/chain/{project_id}/verify`
+
+---
+
 *End of Cryptographic Design Specification*
+
 
 

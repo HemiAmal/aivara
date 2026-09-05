@@ -440,10 +440,14 @@ RiskAssessment = RiskAssessmentRead
 class AuditEventBase(BaseModel):
     event_type: str = Field(..., min_length=1, max_length=100)
     actor: str = Field(default="system", max_length=255)
+    action: Optional[str] = Field(None, max_length=100)
     target_type: Optional[str] = Field(None, max_length=50)
     target_id: Optional[str] = Field(None, max_length=36)
+    outcome: Optional[str] = Field(default="SUCCESS", max_length=50)
     description: Optional[str] = None
     metadata_json: Dict[str, Any] = Field(default_factory=dict)
+    sequence_number: Optional[int] = Field(None, ge=0)
+    previous_event_hash: Optional[str] = Field(None, max_length=64)
 
 
 class AuditEventCreate(AuditEventBase):
@@ -460,6 +464,33 @@ class AuditEventRead(AuditEventBase):
 
 
 AuditEvent = AuditEventRead
+
+
+class AuditChainVerificationRequest(BaseModel):
+    """Request payload for verifying an in-memory or caller-supplied audit chain."""
+    events: Optional[List[Dict[str, Any]]] = Field(None, description="Ordered audit event dictionaries")
+    project_id: Optional[str] = Field(None, description="Expected project identifier")
+
+
+class AuditVerificationFailure(BaseModel):
+    """Diagnostic detail for a specific audit verification failure."""
+    code: str = Field(..., description="Machine-readable failure code")
+    message: str = Field(..., description="Human-readable objective explanation of failure")
+    sequence_number: Optional[int] = Field(None, description="Sequence number where failure occurred")
+    event_id: Optional[str] = Field(None, description="Audit event ID if available")
+    expected: Optional[str] = Field(None, description="Expected cryptographic value")
+    observed: Optional[str] = Field(None, description="Observed cryptographic value")
+
+
+class AuditVerificationResult(BaseModel):
+    """Structured cryptographic result of audit chain verification."""
+    valid: bool = Field(..., description="True only if all cryptographic checks pass")
+    chain_valid: bool = Field(..., description="True if chain continuity and genesis are intact")
+    checked_events: int = Field(default=0, description="Total events verified in sequence")
+    status: str = Field(..., description="Evaluation status: VALID, AUDIT_INTEGRITY_VIOLATION, UNVERIFIABLE_INPUT")
+    failures: List[AuditVerificationFailure] = Field(default_factory=list, description="All detected failures")
+    warnings: List[str] = Field(default_factory=list, description="Non-fatal operational warnings")
+    project_id: Optional[str] = Field(None, description="Project context verified")
 
 
 # =====================================================================

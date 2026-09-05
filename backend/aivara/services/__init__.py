@@ -5,6 +5,12 @@ from aivara.services.contributor_service import ContributorService
 from aivara.services.dataset_service import DatasetService
 from aivara.services.model_service import AIModelService
 from aivara.services.provenance_service import ProvenanceService
+from aivara.services.audit_service import (
+    AuditService,
+    AuditServiceError,
+    AuditEventNotFoundError,
+    AuditSequenceCollisionError,
+)
 
 __all__ = [
     "ProjectService",
@@ -12,4 +18,8 @@ __all__ = [
     "DatasetService",
     "AIModelService",
     "ProvenanceService",
+    "AuditService",
+    "AuditServiceError",
+    "AuditEventNotFoundError",
+    "AuditSequenceCollisionError",
 ]

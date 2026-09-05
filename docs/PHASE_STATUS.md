@@ -12,7 +12,7 @@
 | **PHASE 1** | Environment Validation & Prerequisites Check | **COMPLETE** | 2026-08-31 |
 | **PHASE 2** | Repository Foundation & Minimal Backend Skeleton | **COMPLETE** | 2026-08-31 |
 | **PHASE 3** | Domain Model & Relational Database Schema Implementation | **COMPLETE** | 2026-09-01 |
-| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1–4.12 Complete) | In Progress |
+| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1–4.13 Complete) | In Progress |
 | **PHASE 4.1** | Cryptographic Provenance Engine Design Review | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.2** | Canonical Serialization Engine (RFC 8785 / JCS) | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.3** | SHA-256 Hashing Engine & Canonical Bridge | **COMPLETE** | 2026-09-05 |
@@ -23,7 +23,48 @@
 | **PHASE 4.10** | Cryptographic Tamper Detection Engine | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.11** | Persistent Replay Detection Engine | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.12** | REST API Integration & Thin Router Adapters | **COMPLETE** | 2026-09-05 |
-| **PHASE 4.13+** | Audit Logging, Security Tests & Attack Demos | **NOT STARTED** | Pending User Authorization |
+| **PHASE 4.13** | Cryptographic Tamper-Evident Audit Logging | **COMPLETE** | 2026-09-05 |
+| **PHASE 4.14+** | Dedicated Security Tests & Attack Demonstrations | **NOT STARTED** | Pending User Authorization |
+
+---
+
+## Phase 4.13 Completed Deliverables
+- [x] Implemented cryptographically tamper-evident audit logging layer (`backend/aivara/crypto/audit.py`, `backend/aivara/services/audit_service.py`).
+- [x] Defined controlled security event taxonomy:
+  - `AuditEventType`: `AUDIT_GENESIS`, `PROVENANCE_RECORDED`, `PROVENANCE_REPLAY_REJECTED`, `PROVENANCE_VERIFICATION`, `TAMPER_ASSESSMENT`, `CHAIN_VERIFICATION`, `AUTHENTICITY_UNAVAILABLE`, `SECURITY_CONFIG_CHANGED`.
+  - `AuditOutcome`: `SUCCESS`, `REJECTED`, `FAILURE`, `WARNING`.
+  - `AuditFailureCode`: `EVENT_HASH_MISMATCH`, `BROKEN_AUDIT_CHAIN`, `INVALID_AUDIT_SEQUENCE`, `SEQUENCE_GAP`, `DUPLICATE_AUDIT_SEQUENCE`, `DUPLICATE_AUDIT_HASH`, `GENESIS_TAMPERING`, `MALFORMED_AUDIT_INPUT`, `PROJECT_MISMATCH`.
+  - `AuditVerificationStatus`: `VALID`, `AUDIT_INTEGRITY_VIOLATION`, `UNVERIFIABLE_INPUT`.
+- [x] Defined strict 13-field canonical audit schema protected by RFC 8785 (JCS) serialization and SHA-256 hashing:
+  - `project_id`, `event_type`, `actor`, `action`, `target_type`, `target_id`, `outcome`, `description`, `sequence_number`, `previous_event_hash`, `timestamp`, `metadata`, `schema_version`.
+  - Zero dynamic/unverified field entry. Metadata is strictly canonicalized JSON.
+- [x] Implemented deterministic project-scoped audit genesis anchor at sequence 0 with `previous_event_hash = "0" * 64`.
+- [x] Extended `AuditEventModel` in `backend/aivara/database/models.py` with `action`, `outcome`, `sequence_number`, `previous_event_hash`, and compound unique indexes:
+  - `Index("ix_audit_events_project_sequence", "project_id", "sequence_number", unique=True)`
+  - `Index("ix_audit_events_project_event_hash", "project_id", "event_hash", unique=True)`
+- [x] Implemented schema reconciliation helper `reconcile_audit_schema` in `backend/aivara/database/connection.py` ensuring existing databases automatically acquire columns and unique indexes on startup.
+- [x] Enforced dual immutability architecture:
+  - Defense-in-depth: In-process SQLAlchemy `before_update` and `before_delete` listeners raise `AuditImmutabilityError`.
+  - Authoritative security: Cryptographic hash chain verification detecting direct SQLite database manipulations.
+- [x] Implemented `AuditService`:
+  - Concurrency-safe genesis auto-initialization at sequence 0.
+  - Monotonic gapless sequence generation (`N + 1`) and continuous previous-event hash linkage.
+  - Independent transaction context for `record_replay_rejected()` ensuring replay rejections survive failed primary business transaction rollbacks.
+  - Strict non-recursive observer boundary: audit logging never triggers secondary audit events on its own operations.
+  - Observable audit failure semantics: audit persistence errors are logged and surfaced as critical conditions without silently fabricating events.
+- [x] Integrated `AuditService` into `ProvenanceService`:
+  - Success path emits `PROVENANCE_RECORDED`.
+  - Replay rejection emits `PROVENANCE_REPLAY_REJECTED` in an independent session.
+  - Verification & tamper assessment operations emit `PROVENANCE_VERIFICATION`, `CHAIN_VERIFICATION`, `TAMPER_ASSESSMENT`.
+- [x] Exposed strictly read-only FastAPI REST endpoints under `/api/v1/audit`:
+  - `GET /api/v1/audit/events/{id}`
+  - `GET /api/v1/audit/events` (paginated, project-filtered)
+  - `GET /api/v1/audit/chain/{project_id}`
+  - `POST /api/v1/audit/chain/verify` (caller-supplied array)
+  - `GET /api/v1/audit/chain/{project_id}/verify` (persisted SQLite chain)
+- [x] Created comprehensive test suite `tests/test_audit_logging.py` covering all 28+ requirements (31/31 passing in 6.34s).
+- [x] Verified full regression test suite across the entire project (318/318 tests passing in 43.57s).
+- [x] Confirmed Phase 4.14 (Security Tests) and Phase 4.15 (Attack Demonstrations) remain NOT STARTED.
 
 ---
 

@@ -10,15 +10,18 @@ Provides:
     while passing unrelated database integrity errors through.
 """
 
-from __future__ import annotations
-
-from typing import Any, Dict, List, Optional, Union
+import logging
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from aivara.core.exceptions import NotFoundException, ValidationException
+from aivara.crypto.audit import (
+    AuditEventType,
+    AuditOutcome,
+)
 from aivara.crypto.chain import (
     ChainRecord,
     DuplicateNonceError,
@@ -54,20 +57,31 @@ from aivara.domain.schemas import (
     ProvenanceRecordCreate,
     ProvenanceRecordRead,
 )
+from aivara.services.audit_service import AuditService
+
+logger = logging.getLogger("aivara.services.provenance")
 
 
 class ProvenanceService:
     """Service managing persistent provenance records and replay detection."""
 
-    def __init__(self, db: Session, key_manager: Optional[KeyManager] = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        key_manager: Optional[KeyManager] = None,
+        audit_service: Optional[AuditService] = None,
+    ) -> None:
         """Initialize ProvenanceService with a SQLAlchemy session and optional KeyManager.
 
         Args:
             db: Active SQLAlchemy database session.
             key_manager: Optional KeyManager instance for resolving public keys.
+            audit_service: Optional AuditService instance. Defaults to AuditService(db).
         """
         self.db = db
         self.key_manager = key_manager
+        self.audit_service = audit_service or AuditService(db)
+        self.last_audit_error: Optional[str] = None
 
     def check_replay(
         self,
@@ -243,6 +257,15 @@ class ProvenanceService:
                         record_hash=rec_hash,
                         reason=f.message,
                     )
+                    self.audit_service.record_replay_rejected(
+                        project_id=project_id,
+                        actor=raw.get("actor", "system"),
+                        reason=f.message,
+                        replay_type=assessment.replay_type.value,
+                        sequence_number=seq,
+                        nonce=nonce,
+                        record_hash=rec_hash,
+                    )
                     raise_replay_error(assessment)
 
         # Advisory check
@@ -253,6 +276,16 @@ class ProvenanceService:
             record_hash=rec_hash,
         )
         if advisory.replay_detected:
+            self.audit_service.record_replay_rejected(
+                project_id=project_id,
+                actor=raw.get("actor", "system"),
+                target_id=advisory.conflicting_record_id,
+                reason=advisory.reason,
+                replay_type=advisory.replay_type.value,
+                sequence_number=seq,
+                nonce=nonce,
+                record_hash=rec_hash,
+            )
             raise_replay_error(advisory)
 
         # Construct SQLAlchemy model
@@ -280,7 +313,32 @@ class ProvenanceService:
             self.db.add(model)
             self.db.commit()
             self.db.refresh(model)
-            return ProvenanceRecordRead.model_validate(model)
+            res = ProvenanceRecordRead.model_validate(model)
+            # Observable audit logging on business success
+            try:
+                self.audit_service.record_event(
+                    project_id=project_id,
+                    event_type=AuditEventType.PROVENANCE_RECORDED,
+                    actor=model.actor or "system",
+                    action=model.action or "RECORD_PROVENANCE",
+                    target_type="PROVENANCE_RECORD",
+                    target_id=model.id,
+                    outcome=AuditOutcome.SUCCESS,
+                    description=f"Provenance record {model.sequence_number} recorded successfully.",
+                    metadata_json={
+                        "sequence_number": model.sequence_number,
+                        "record_hash": model.record_hash,
+                        "nonce": model.nonce,
+                    },
+                )
+            except Exception as audit_exc:
+                self.last_audit_error = str(audit_exc)
+                logger.error(
+                    "CRITICAL_SECURITY_CONDITION: Business operation succeeded but audit logging failed for project '%s': %s",
+                    project_id,
+                    audit_exc,
+                )
+            return res
         except IntegrityError as exc:
             self.db.rollback()
             is_replay, r_type, reason, conf_id = classify_integrity_error(
@@ -301,6 +359,17 @@ class ProvenanceService:
                     record_hash=rec_hash,
                     conflicting_record_id=conf_id,
                     reason=reason,
+                )
+                # Independent transaction: audit survives failed business transaction rollback
+                self.audit_service.record_replay_rejected(
+                    project_id=project_id,
+                    actor=raw.get("actor", "system"),
+                    target_id=conf_id,
+                    reason=reason,
+                    replay_type=r_type.value,
+                    sequence_number=seq,
+                    nonce=nonce,
+                    record_hash=rec_hash,
                 )
                 raise_replay_error(assessment)
             # Unrelated database error (e.g. foreign key failure) — do NOT classify as replay
@@ -427,7 +496,7 @@ class ProvenanceService:
         else:
             raise ValidationException("Either 'record' payload or 'record_id' must be provided for verification.")
 
-        return verify_record(
+        v_result = verify_record(
             record=target_data,
             key_manager=self.key_manager,
             allow_unsigned=allow_unsigned,
@@ -435,6 +504,27 @@ class ProvenanceService:
             expected_sequence=expected_sequence,
             expected_previous_record_hash=expected_previous_record_hash,
         )
+        pid = expected_project_id or (isinstance(target_data, dict) and target_data.get("project_id"))
+        if pid:
+            try:
+                self.audit_service.record_event(
+                    project_id=pid,
+                    event_type=AuditEventType.PROVENANCE_VERIFICATION,
+                    actor="verifier",
+                    action="VERIFY_PROVENANCE_RECORD",
+                    target_type="PROVENANCE_RECORD",
+                    target_id=target_data.get("id"),
+                    outcome=AuditOutcome.SUCCESS if v_result.overall_valid else AuditOutcome.FAILURE,
+                    description="Provenance record verification executed.",
+                    metadata_json={
+                        "valid": v_result.overall_valid,
+                        "failure_count": len(v_result.failures),
+                    },
+                )
+            except Exception as audit_exc:
+                self.last_audit_error = str(audit_exc)
+                logger.error("Audit logging failed during verify_record: %s", audit_exc)
+        return v_result
 
     def verify_chain(
         self,
@@ -466,12 +556,33 @@ class ProvenanceService:
         else:
             raise ValidationException("Either 'records' or 'project_id' must be provided for chain verification.")
 
-        return verify_provenance_chain(
+        chain_result = verify_provenance_chain(
             records=target_records,
             expected_project_id=project_id,
             key_manager=self.key_manager,
             allow_unsigned=allow_unsigned,
         )
+        pid = project_id or (target_records and target_records[0].get("project_id"))
+        if pid:
+            try:
+                self.audit_service.record_event(
+                    project_id=pid,
+                    event_type=AuditEventType.CHAIN_VERIFICATION,
+                    actor="verifier",
+                    action="VERIFY_PROVENANCE_CHAIN",
+                    target_type="PROVENANCE_CHAIN",
+                    target_id=pid,
+                    outcome=AuditOutcome.SUCCESS if chain_result.overall_valid else AuditOutcome.FAILURE,
+                    description="Provenance chain verification executed.",
+                    metadata_json={
+                        "chain_valid": chain_result.chain_valid,
+                        "records_verified": chain_result.records_verified_count,
+                    },
+                )
+            except Exception as audit_exc:
+                self.last_audit_error = str(audit_exc)
+                logger.error("Audit logging failed during verify_chain: %s", audit_exc)
+        return chain_result
 
     def assess_record_tampering(
         self,

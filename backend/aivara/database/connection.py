@@ -87,6 +87,56 @@ def reconcile_provenance_schema(db_engine=None) -> None:
             ))
 
 
+def reconcile_audit_schema(db_engine=None) -> None:
+    """Safely reconcile audit_events schema on existing SQLite databases (Phase 4.13).
+
+    Ensures that existing databases created prior to Phase 4.13 acquire the
+    nullable 'action', 'outcome', 'sequence_number', and 'previous_event_hash' columns
+    and required unique indexes without destroying or recreating existing data.
+    """
+    target_engine = db_engine or engine
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(target_engine)
+    if "audit_events" not in inspector.get_table_names():
+        return
+
+    existing_columns = {col["name"] for col in inspector.get_columns("audit_events")}
+
+    with target_engine.begin() as conn:
+        if "action" not in existing_columns:
+            logger.info("Reconciling schema: adding 'action' column to audit_events")
+            conn.execute(text("ALTER TABLE audit_events ADD COLUMN action VARCHAR(100);"))
+
+        if "outcome" not in existing_columns:
+            logger.info("Reconciling schema: adding 'outcome' column to audit_events")
+            conn.execute(text("ALTER TABLE audit_events ADD COLUMN outcome VARCHAR(50) DEFAULT 'SUCCESS';"))
+
+        if "sequence_number" not in existing_columns:
+            logger.info("Reconciling schema: adding 'sequence_number' column to audit_events")
+            conn.execute(text("ALTER TABLE audit_events ADD COLUMN sequence_number INTEGER;"))
+
+        if "previous_event_hash" not in existing_columns:
+            logger.info("Reconciling schema: adding 'previous_event_hash' column to audit_events")
+            conn.execute(text("ALTER TABLE audit_events ADD COLUMN previous_event_hash VARCHAR(64);"))
+
+        existing_indexes = {idx["name"]: idx for idx in inspector.get_indexes("audit_events")}
+
+        if "ix_audit_events_project_sequence" not in existing_indexes:
+            logger.info("Creating unique index ix_audit_events_project_sequence")
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_audit_events_project_sequence "
+                "ON audit_events (project_id, sequence_number);"
+            ))
+
+        if "ix_audit_events_project_event_hash" not in existing_indexes:
+            logger.info("Creating unique index ix_audit_events_project_event_hash")
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_audit_events_project_event_hash "
+                "ON audit_events (project_id, event_hash);"
+            ))
+
+
 def init_db(db_engine=None) -> None:
     """Initialize SQLite database file and schema foundation cleanly."""
     target_engine = db_engine or engine
@@ -94,6 +144,7 @@ def init_db(db_engine=None) -> None:
     logger.info("Initializing database at: %s", settings.database_path)
     Base.metadata.create_all(bind=target_engine)
     reconcile_provenance_schema(target_engine)
+    reconcile_audit_schema(target_engine)
 
 
 def get_db() -> Generator[Session, None, None]:

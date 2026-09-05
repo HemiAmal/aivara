@@ -21,10 +21,12 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    event,
 )
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import relationship
 
+from aivara.core.exceptions import AivaraException
 from aivara.database.connection import Base
 
 
@@ -457,8 +459,18 @@ class RiskAssessmentModel(Base):
 # Audit Event
 # ---------------------------------------------------------------------------
 
+class AuditImmutabilityError(AivaraException, RuntimeError):
+    """Raised when an attempt is made to update or delete a persisted AuditEventModel."""
+
+    def __init__(
+        self,
+        message: str = "AuditEventModel instances are immutable and cannot be modified or deleted.",
+    ) -> None:
+        super().__init__(message, code="AUDIT_IMMUTABLE")
+
+
 class AuditEventModel(Base):
-    """An important system event for audit trail purposes."""
+    """An important system event for audit trail purposes. Forms an immutable hash-linked chain."""
 
     __tablename__ = "audit_events"
 
@@ -466,11 +478,15 @@ class AuditEventModel(Base):
     project_id = Column(String(36), ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False)
     event_type = Column(String(100), nullable=False)
     actor = Column(String(255), default="system", nullable=False)
+    action = Column(String(100), nullable=True)
     target_type = Column(String(50), nullable=True)
     target_id = Column(String(36), nullable=True)
+    outcome = Column(String(50), nullable=True, default="SUCCESS")
     description = Column(Text, nullable=True)
     metadata_json = Column(JSON, default=dict, nullable=False)
-    event_hash = Column(String(64), nullable=True)  # placeholder for Phase 4 tamper-evidence
+    sequence_number = Column(Integer, nullable=True)
+    previous_event_hash = Column(String(64), nullable=True)
+    event_hash = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=utcnow, nullable=False)
 
     # Relationships
@@ -480,7 +496,21 @@ class AuditEventModel(Base):
         Index("ix_audit_events_project_id", "project_id"),
         Index("ix_audit_events_event_type", "event_type"),
         Index("ix_audit_events_created_at", "created_at"),
+        Index("ix_audit_events_project_sequence", "project_id", "sequence_number", unique=True),
+        Index("ix_audit_events_project_event_hash", "project_id", "event_hash", unique=True),
     )
+
+
+@event.listens_for(AuditEventModel, "before_update")
+def _prevent_audit_update(mapper, connection, target):
+    """Defense-in-depth: prevent accidental in-process ORM mutation of audit events."""
+    raise AuditImmutabilityError("AuditEventModel instances are immutable and cannot be updated.")
+
+
+@event.listens_for(AuditEventModel, "before_delete")
+def _prevent_audit_delete(mapper, connection, target):
+    """Defense-in-depth: prevent accidental in-process ORM deletion of audit events."""
+    raise AuditImmutabilityError("AuditEventModel instances are immutable and cannot be deleted.")
 
 
 # ---------------------------------------------------------------------------
