@@ -36,11 +36,174 @@
 | **PHASE 5.5.1** | Label Anomaly Architecture Review + Design Freeze | **COMPLETE** | 2026-09-09 |
 | **PHASE 5.6** | Targeted Label-Flipping Detection Engine | **COMPLETE** | 2026-09-10 |
 | **PHASE 5.6.1** | Label-Flipping Architecture Review & Design Freeze | **COMPLETE** | 2026-09-09 |
-| **PHASE 5.7** | Out-of-Distribution (OOD) & Image Quality Engine | **NOT STARTED** | — |
-| **PHASE 5.8** | Contributor Risk Aggregation Engine | **NOT STARTED** | — |
-| **PHASE 5.9** | Evidence Generation & Provenance Ledger Integration | **NOT STARTED** | — |
+| **PHASE 5.7** | Out-of-Distribution (OOD) & Image Quality Engine | **COMPLETE** | 2026-09-10 |
+| **PHASE 5.7.1** | OOD + Image Quality Architecture Review & Design Freeze | **COMPLETE** | 2026-09-10 |
+| **PHASE 5.8** | Contributor Aggregation Engine | **COMPLETE** | 2026-09-10 |
+| **PHASE 5.8.1** | Contributor Aggregation Architecture Review & Design Freeze | **COMPLETE** | 2026-09-10 |
+| **PHASE 5.9** | Evidence Generation & Provenance Ledger Integration | **COMPLETE** | 2026-09-10 |
+| **PHASE 5.9.1** | Evidence + Provenance Architecture Review & Design Freeze | **COMPLETE** | 2026-09-10 |
 | **PHASE 5.10** | REST API Adapters & Engine Orchestration Service | **NOT STARTED** | — |
 | **PHASE 5.11** | Comprehensive Phase 5 Test Suite & Performance Verification | **NOT STARTED** | — |
+
+## Phase 5.9 Completed Deliverables
+- [x] Implemented Evidence + Provenance package (`backend/aivara/evidence/`):
+  - **Deterministic Canonical Evidence Identity (`identity.py`):**
+    - RFC 8785 (JCS) canonical serialization bridging to Phase 4 `hash_canonical_data` / SHA-256.
+    - Excludes non-semantic mutable attributes (UUIDs, timestamps, filepaths, self-referential hashes).
+    - Sorts associative keys and un-ordered reference sets while preserving order-sensitive arrays.
+  - **Comprehensive Execution Identity & Normalization (`identity.py`):**
+    - Generates deterministic `ExecutionIdentityPayload` incorporating 11 result-altering parameters (project, dataset version/fingerprint, detector ID/version/config hash, engine version, policy version, preprocessing hash, model ID/fingerprint/version, reference dataset/fingerprint).
+    - Applied frozen standard normalizations (`NONE`, `STANDARD_V1`, `UNAVAILABLE`) to eliminate accidental collisions.
+    - Idempotency recognition returning `IDEMPOTENT_HIT` without duplicate evidence persistence.
+  - **Strict Input Validation & Vocabulary Filter (`validators.py`):**
+    - Numeric sanitization rejecting `NaN` and `Infinity`.
+    - Prohibited vocabulary guard rejecting accusatory/malicious terminology (`malicious`, `sabotage`, `adversary`, `backdoor`, `poisoning`).
+    - ADR-028 proof-layer confidence enforcement ($\text{confidence} = 1.0$ for proof layer, $[0.0, 1.0]$ for detection layer).
+    - Multi-tenant isolation rejecting cross-project bindings across evidence, dataset versions, and provenance records.
+    - Dataset and Model fingerprint binding validators preventing cross-version or model substitution.
+  - **Evidence ↔ Finding Binding Engine (`binding.py`):**
+    - Supports primary finding linkage (`EvidenceModel.finding_id`) alongside derived/synthesized $N:M$ evidence citation via structured `metadata_json.referenced_evidence_ids`.
+    - Backward-traceable graph generation (`build_traceability_chain`) linking `Finding` $\to$ `Evidence` $\to$ `Execution` $\to$ `Provenance` $\to$ `Verification`.
+  - **Phase 4 Provenance Integration (`provenance.py`):**
+    - Atomic batch sealing with Ed25519 digital signatures and SHA-256 Merkle root binding.
+    - Full cryptographic verification with tamper detection and state distinction (`VERIFIED`, `UNVERIFIED`, `UNAVAILABLE`, `MISMATCHED`, `INVALID`).
+  - **Domain Orchestrator & Audit Service Integration (`service.py`):**
+    - High-level lifecycle audit logging via Phase 4 `AuditService` (`DATASET_SCAN_STARTED`, `DATASET_SCAN_COMPLETED`, `FINDING_CONFIRMED`) avoiding per-sample noise.
+    - Fully offline, 0 database schema changes, 0 Phase 4 crypto modifications, 0 REST endpoints.
+
+---
+
+## Phase 5.9.1 Completed Deliverables
+- [x] Produced comprehensive Evidence + Provenance Architecture Specification ([`docs/EVIDENCE_PROVENANCE_ARCHITECTURE.md`](file:///d:/Downloads/Projects/AiVara/docs/EVIDENCE_PROVENANCE_ARCHITECTURE.md)):
+  - **Foundational Semantic Safety Invariants:** Formalized 8 core invariants enforcing strict separation between Detection Layer (`evidence_layer="detection"`) and Proof Layer (`evidence_layer="proof"`):
+    - $\text{Evidence} \ne \text{Finding}$
+    - $\text{Detection Evidence} \ne \text{Cryptographic Proof}$
+    - $\text{Cryptographic Authenticity} \ne \text{Analytical Correctness}$
+    - $\text{Statistical Association} \ne \text{Causation}$
+    - $\text{Anomaly} \ne \text{Maliciousness}$
+    - $\text{Evidence Diversity} \ne \text{Evidence Independence}$
+    - $\text{Multiple Observations} \ne \text{Composite Risk Score}$ (Risk aggregation and decisioning reserved for Phase 12; Phase 8 provides Behavioural Analysis evidence)
+    - $\text{Contributor Evidence} \ne \text{Contributor Guilt}$
+  - **Comprehensive Canonical Execution Identity:** Formulated structured RFC 8785 canonical execution identity (`ExecutionIdentityPayload` / `ExecutionIdentityHash`) incorporating all inputs that influence analytical output (project, dataset version/fingerprint, detector ID/version/config hash, model ID/fingerprint/version, reference dataset/fingerprint, preprocessing hash, policy version) to prevent cross-execution collisions.
+  - **Evidence ↔ Finding $N:M$ Cardinality:** Formalized conceptual many-to-many relationship supporting multi-signal finding synthesis and multi-finding evidence citation, utilizing primary foreign keys (`EvidenceModel.finding_id`) alongside structured metadata references (`metadata_json.referenced_evidence_ids`) for Phase 3 schema compatibility with documented future relational junction table requirements.
+  - **Deterministic Evidence Identity:** Formulated deterministic canonical RFC 8785 + SHA-256 evidence hashing excluding wall-clock timestamps, runtime UUIDs, and local filesystem paths to guarantee 100% bit-for-bit reproducibility.
+  - **Multi-Entity Traceability Graph:** Formalized end-to-end relational and cryptographic binding across `Project` $\to$ `Dataset` $\to$ `DatasetVersion` $\to$ `Sample` $\to$ `Annotation` $\to$ `Contributor` $\to$ `AIModel` $\to$ `ModelFingerprint` $\to$ `Evidence` $\to$ `Finding` $\to$ `ProvenanceRecord` $\to$ `AuditEvent`.
+  - **Confidence Semantics & ADR-028 Rule:** Defined rigorous confidence taxonomy preserving proof-layer $\text{confidence} = 1.0$ requirement while mapping statistical/ML uncertainties to detection-layer findings.
+  - **Dataset Fingerprint & Version Lineage:** Bound analytical scans to exact manifest SHA-256 digests and Merkle roots to prevent silent cross-version contamination.
+  - **Model & Reference Baseline Binding:** Bound model-dependent detectors to model fingerprints, weight digests, and reference dataset manifests with explicit state handling for missing fingerprints (`PROVENANCE_UNAVAILABLE`).
+  - **Explicit Degradation & Failure States:** Defined fault-isolated partial scan semantics (`DETECTOR_EXECUTION_PARTIAL`) and state machines for unverified, missing, or mismatched provenance.
+  - **Architectural Review Answers:** Documented explicit, authoritative answers to all 30 architectural review questions.
+  - **Zero Database Changes & Zero Production Code Changes:** Verified design-only integrity with 100% offline air-gapped capability.
+
+---
+
+## Phase 5.8 Completed Deliverables
+- [x] Implemented Contributor Aggregation Engine package (`backend/aivara/dataset/contributors/`):
+  - **Deterministic 1/K Contributor Attribution (`attribution.py`):**
+    - Normalized contributor identifier deduplication and canonical handling (`normalize_contributor_ids`).
+    - Exact fractional weighting: $w_{s,c} = 1/K$ for $K$ distinct contributors on sample $s$, guaranteeing $\sum_{c} w_{s,c} = 1.0$ (`build_sample_attribution_map`).
+    - Linear sample count and exposure accumulation (`compute_contributor_exposures`, `compute_contributor_sample_counts`, `compute_contributor_shared_counts`).
+    - Deterministic `UNATTRIBUTED` bucket preserving anonymous samples and unlinked anomalies without creating fake entities.
+  - **Statistical Metrics & Uncertainty Quantification (`statistics.py`):**
+    - Conservative 95% Wilson score confidence interval lower bound ($w^-$) and upper bound ($w^+$) for binomial and fractional rates (`compute_wilson_confidence_interval`).
+    - Rate differential $\Delta = R_c - R_{\text{bg}}$ and asymptotic standard error $\text{SE}(\Delta) = \sqrt{\frac{R_c(1-R_c)}{n_c} + \frac{R_{\text{bg}}(1-R_{\text{bg}})}{N_{\text{bg}}}}$ (`compute_rate_differential_and_se`).
+    - Shannon entropy in bits $H(c) = -\sum p(y|c) \log_2 p(y|c)$ (`compute_shannon_entropy`).
+    - Herfindahl-Hirschman Index ($\text{HHI} = \sum s_i^2$) for measuring anomaly concentration across contributors (`compute_herfindahl_hirschman_index`).
+    - Gini coefficient inequality index (`compute_gini_coefficient`).
+  - **Leave-One-Out (LOO) & Subgroup Stratification Engine (`baselines.py`):**
+    - Pure leave-one-out background calculations eliminating self-contamination: $N_{\text{bg}} = N_{\text{total}} - n_c$, $K_{\text{bg}} = K_{\text{total}} - k_c$ (`compute_leave_one_out_baseline`).
+    - Subgroup stratification across class, sensor, terrain, and illumination dimensions to avoid Simpson's paradox (`compute_subgroup_stratified_rates`).
+  - **Evidence Profile Aggregator (`aggregation.py`):**
+    - Multi-signal profile builder (`build_contributor_profiles`) tracking exposure, rates, conservative bounds, differentials, and multi-signal diversity count without score summation.
+  - **Detection & Finding Synthesis Orchestrator (`detector.py`):**
+    - Orchestrator (`ContributorAggregationEngine`, `aggregate_contributor_evidence`) generating structured findings:
+      - `INSUFFICIENT_CONTRIBUTOR_SUPPORT` ($n < 5$)
+      - `UNATTRIBUTED_EVIDENCE` (preserving unattributed anomalies)
+      - `CONTRIBUTOR_CLASS_DISTRIBUTION` (descriptive finding for focused specialization)
+      - `CONTRIBUTOR_ANOMALY_CONCENTRATION` ($\text{share} \ge 0.50, \text{HHI} \ge 0.40$)
+      - `CONTRIBUTOR_LABEL_TRANSITION` ($\Delta \ge 0.30$)
+      - `CONTRIBUTOR_OOD_CONCENTRATION` ($\Delta \ge 0.25, w^- \ge 0.15$)
+      - `CONTRIBUTOR_QUALITY_CONCENTRATION` ($\Delta \ge 0.30, w^- \ge 0.20$)
+      - `CONTRIBUTOR_DUPLICATE_CONCENTRATION` ($\Delta \ge 0.25, w^- \ge 0.15$)
+      - `CONTRIBUTOR_MULTI_SIGNAL_EVIDENCE` ($\text{diversity} \ge 3$)
+  - **Immutable Domain Schemas (`schemas.py`) & Domain Exceptions (`exceptions.py`):**
+    - Frozen Pydantic schemas (`ContributorCategory`, `ContributorEvidenceMetric`, `ContributorEvidenceProfile`, `ContributorScanFinding`, `ContributorAggregationConfig`, `ContributorAggregationResult`).
+    - Invariant validation preventing malicious, accusatory, or guilt-attributing terms in explanations.
+- [x] Dedicated test suite (`tests/test_contributor_aggregation.py`): 37/37 passing unit tests covering all required scenarios.
+- [x] Full regression test suite: 665/665 tests passing (100%).
+- [x] Zero database schema mutations.
+- [x] Zero Phase 4 cryptographic code changes.
+- [x] 100% offline air-gapped execution.
+
+---
+
+## Phase 5.8.1 Completed Deliverables
+- [x] Produced comprehensive Contributor Aggregation Engine Architecture Specification ([`docs/CONTRIBUTOR_AGGREGATION_ARCHITECTURE.md`](file:///d:/Downloads/Projects/AiVara/docs/CONTRIBUTOR_AGGREGATION_ARCHITECTURE.md)):
+  - **Foundational Semantic Invariant:** Enforced strict decoupling: $\text{CONTRIBUTOR EVIDENCE} \ne \text{CONTRIBUTOR GUILT}$, $\text{ANOMALY CONCENTRATION} \ne \text{MALICIOUSNESS}$. All findings output under ADR-028/ADR-029 `evidence_layer="detection"`.
+  - **Evidence vs. Risk Boundary:** Strictly prohibits final risk scoring, culpability weighting, threat ranking, or quarantine decisions in Phase 5.8 (reserved for Phase 8).
+  - **Multi-Contributor Linear Attribution:** Formalized deterministic equal fractional attribution ($w_{s,c} = 1/K$) for shared samples, conserving total dataset anomaly counts without inflation.
+  - **Subgroup-Aware & Leave-One-Out Baselines:** Designed stratified subgroup baselines (by class, sensor, terrain, and illumination) to prevent Simpson's paradox from confounding legitimate specialization with anomaly concentration.
+  - **Exposure Normalization & Uncertainty:** Formulated conservative 95% Wilson Confidence Interval Lower Bounds ($w^-$) to eliminate spurious percentages from small sample sizes.
+  - **Evidence Diversity & Concentration:** Defined non-additive multi-signal evidence profiles ($\text{DiversityCount}$) and Herfindahl-Hirschman Index ($\text{HHI}$) dispersion metrics without double-counting correlated signals.
+  - **Small-Data Guardrails:** Defined explicit protections for micro-contributors ($n < 5 \to \text{INSUFFICIENT_CONTRIBUTOR_SUPPORT}$), small contributors ($5 \le n < 25$), and solo-contributor datasets.
+  - **Unknown Contributor Handling:** Established deterministic `UNATTRIBUTED` aggregation bucket to ensure 100% evidence preservation.
+  - **Immutable Domain Models & Test Strategy:** Designed frozen Pydantic schemas and 32-scenario test strategy.
+  - **Zero Database Schema Mutations & Zero Production Code Changes:** Verified design-only integrity.
+
+---
+
+## Phase 5.7 Completed Deliverables
+- [x] Implemented Out-of-Distribution (OOD) & Image Quality Analysis Engine package (`backend/aivara/dataset/ood/`):
+  - **Deterministic Image Quality Core (`quality.py`):**
+    - Variance of Laplacian blur/focus estimation (`compute_variance_of_laplacian`).
+    - Tenengrad Sobel gradient sharpness and acutance scoring (`compute_tenengrad_sharpness`).
+    - Luminance histogram exposure auditing: mean luminance, RMS contrast, shadow underexposure clipping ($Y < 15$), and highlight overexposure clipping ($Y > 240$) (`compute_luminance_and_exposure`).
+    - Color cast & saturation analysis: HSV saturation and CIELAB chromaticity divergence ($\Delta_{\text{cast}} = \sqrt{\bar{a^*}^2 + \bar{b^*}^2}$) (`compute_color_cast_and_saturation`).
+    - Immerkaer spatial noise variance estimation and Signal-to-Noise Ratio (SNR) in dB (`compute_immerkaer_noise_and_snr`).
+    - JPEG 8x8 DCT grid boundary blockiness step ratio (`compute_jpeg_blockiness`).
+    - Non-overlapping 16x16 patch uniform region fraction (`compute_uniform_region_ratio`).
+    - Calibrated composite quality score index in $[0.0, 1.0]$ (`compute_composite_quality_score`).
+    - Comprehensive metadata extractor (`extract_image_quality_metrics`).
+  - **Dual-Tier Feature Extraction Engine (`features.py`):**
+    - Tier 1: Guaranteed 100% offline, deterministic 128-dimensional statistical pixel descriptor combining 32-bin RGB and 16-bin HSV histograms with L2 normalization (`extract_tier1_statistical_descriptor`).
+    - Tier 2: Frozen pretrained deep visual embeddings with automatic fallback (`VisualFeatureExtractor`).
+    - Explicit state machine handling (`FeatureExtractionStatus.TIER1_STATISTICAL_ONLY`, `TIER1_FALLBACK`, `TIER2_DEEP_EMBEDDING`, `FEATURE_EXTRACTOR_UNAVAILABLE`). Zero fabricated synthetic embeddings.
+  - **Dataset Distribution Shift & Operational Drift (`drift.py`):**
+    - Maximum Mean Discrepancy (MMD) with RBF kernel median heuristic (`compute_mmd`, `compute_rbf_kernel_matrix`).
+    - Non-parametric Energy Distance (`compute_energy_distance`).
+    - Permutation testing for empirical null distribution calibration and p-value estimation (`evaluate_distribution_shift`).
+    - Non-adversarial operational shift classification with `is_targeted=False` and shift factor identification (luminance, palette, feature divergence).
+  - **OOD Detection & Finding Orchestration (`detector.py`):**
+    - Robust non-parametric Median + MAD threshold calibration: $\tau_{\text{OOD}} = \text{median} + 3.5 \cdot (1.4826 \cdot \text{MAD})$ (`compute_mad_threshold`).
+    - Global $k\text{NN}$ and class-conditional $k\text{NN}$ distance scoring (`compute_knn_distance`).
+    - Reference distribution management (`INTERNAL_DATASET_BASELINE`, `EXPLICIT_REFERENCE_DATASET`, `FROZEN_DOMAIN_REFERENCE`).
+    - Small dataset ($N < 25$), tiny reference ($M_{\text{ref}} < 25$), and rare class ($N_{\text{class}} < 5$ fallback to `FALLBACK_GLOBAL_OOD`) guardrails.
+    - Security and anti-DoS integration (rejection of $> 100\text{M}$ pixels and extreme aspect ratios $> 100$).
+    - Structured error resilience (`IMAGE_CORRUPTION` on malformed image files without crashing pipeline).
+    - Multi-signal finding generation preserving orthogonality between physical image quality anomalies and OOD distances.
+    - Strict semantic invariant: $\text{OOD} \ne \text{MALICIOUSNESS}$, $\text{IMAGE QUALITY DEGRADATION} \ne \text{MALICIOUSNESS}$, `evidence_layer="detection"`.
+  - **Immutable Domain Schemas (`schemas.py`) & Domain Exceptions (`exceptions.py`):**
+    - Frozen Pydantic models (`FeatureExtractionStatus`, `ReferenceMode`, `OODCategory`, `ImageQualityMetrics`, `ImageQualityConfig`, `OODScore`, `DistributionShiftEvidence`, `ReferenceDistribution`, `OODScanFinding`, `OODConfig`, `OODScanResult`).
+- [x] Dedicated test suite (`tests/test_ood_quality.py`): 26/26 passing unit tests covering all 45 mandated scenarios.
+- [x] Full regression test suite: 628/628 tests passing (100%).
+- [x] Zero database schema mutations.
+- [x] Zero Phase 4 cryptographic code changes.
+- [x] 100% offline air-gapped execution.
+
+---
+
+## Phase 5.7.1 Completed Deliverables
+- [x] Produced comprehensive OOD & Image Quality Analysis Architecture Specification ([`docs/OOD_IMAGE_QUALITY_ARCHITECTURE.md`](file:///d:/Downloads/Projects/AiVara/docs/OOD_IMAGE_QUALITY_ARCHITECTURE.md)):
+  - **Foundational Semantic Invariant:** Enforced strict decoupling: $\text{OOD} \ne \text{MALICIOUSNESS}$, $\text{IMAGE QUALITY DEGRADATION} \ne \text{MALICIOUSNESS}$, $\text{DISTRIBUTION SHIFT} \ne \text{ATTACK}$. All findings output under ADR-028 `evidence_layer="detection"`.
+  - **Multi-Signal Orthogonality:** Formalized independent representation of image quality degradation, out-of-distribution distance, and label anomalies.
+  - **Deterministic Image Quality Core:** Formulated objective metrics for Blur (Variance of Laplacian), Sharpness (Tenengrad), Exposure (Luminance Histogram clipping), Color Cast ($\text{CIELAB } \Delta_{\text{cast}}$), Spatial Noise (Immerkaer estimator & SNR), JPEG Blockiness (8x8 DCT grid steps), Resolution/Aspect Ratio anomalies, and Uniform/Blank patch ratios.
+  - **Dual-Tier Feature Representation:** Guaranteed 100% offline air-gapped CPU fallback via Tier 1 Statistical Pixel Descriptors (color histograms, moments, texture stats) alongside Tier 2 frozen deep visual embeddings when available.
+  - **Reference Distribution & Threshold Calibration:** Defined reference baseline models (Internal, Explicit Reference, Frozen Domain) with non-parametric Median Absolute Deviation (MAD) threshold calibration.
+  - **Environmental & Operational Drift:** Distinguished legitimate domain/sensor/seasonal shifts from concentrated anomalies using non-parametric MMD and Energy Distance.
+  - **Small-Data & Missing Model Safeguards:** Enforced guardrails for micro-datasets ($N < 25$), tiny reference sets ($M_{\text{ref}} < 25$), rare classes ($N_c < 5$), singleton classes, and offline model state machines (`FEATURE_EXTRACTOR_UNAVAILABLE` fallback).
+  - **Security & Anti-DoS:** Integrated decompression bomb protections ($> 10^8$ pixels), NaN/Inf defensive sanitization, and path sandboxing.
+  - **Immutable Domain Models & Test Strategy:** Designed frozen Pydantic schemas and 36-scenario test strategy.
+  - **Zero Database Schema Mutations & Zero Production Code Changes:** Verified design-only integrity.
 
 ---
 
