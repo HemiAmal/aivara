@@ -26,7 +26,7 @@
 | **PHASE 4.13** | Cryptographic Tamper-Evident Audit Logging | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.14** | Comprehensive Security Testing (ST-01 to ST-10) | **COMPLETE** | 2026-09-06 |
 | **PHASE 4.15** | Attack Lab & Tampering Demonstrations | **COMPLETE** | 2026-09-08 |
-| **PHASE 5** | Dataset Integrity Engine | **IN PROGRESS** | — |
+| **PHASE 5** | Dataset Integrity Engine | **COMPLETE** | 2026-09-10 |
 | **PHASE 5.1** | Dataset Integrity Architecture Review & Design Freeze | **COMPLETE** | 2026-09-08 |
 | **PHASE 5.2** | Ingestion & Normalization Engine (COCO, YOLO, ImageFolder) | **COMPLETE** | 2026-09-08 |
 | **PHASE 5.3** | Multi-Tier Fingerprinting & Merkle Tree Integrity Engine | **COMPLETE** | 2026-09-09 |
@@ -43,7 +43,36 @@
 | **PHASE 5.9** | Evidence Generation & Provenance Ledger Integration | **COMPLETE** | 2026-09-10 |
 | **PHASE 5.9.1** | Evidence + Provenance Architecture Review & Design Freeze | **COMPLETE** | 2026-09-10 |
 | **PHASE 5.10** | REST API Adapters & Engine Orchestration Service | **COMPLETE** | 2026-09-10 |
-| **PHASE 5.11** | Comprehensive Phase 5 Test Suite & Performance Verification | **NOT STARTED** | — |
+| **PHASE 5.11** | Comprehensive Phase 5 Test Suite & Performance Verification | **COMPLETE** | 2026-09-10 |
+
+## Phase 5.11 Completed Deliverables
+- [x] Comprehensive End-to-End Verification Suite (`tests/test_phase5_comprehensive.py`):
+  - **33 Comprehensive Integration Tests** covering the complete Phase 5 dataset-integrity subsystem end-to-end:
+    - **Self-Contained Deterministic Multi-Contributor Test Fixture:** Exercises synthetic multi-class, multi-contributor samples, near-duplicates, label anomalies, directional label flips, physical image quality degradation, OOD samples, and contributor distributions in a 100% offline air-gapped test environment.
+    - **Ingestion $\to$ Canonical Normalization $\to$ Multi-Tier Fingerprinting $\to$ Merkle Tree Integration:** Verifies raw image SHA-256, decoded RGB SHA-256, quantized annotation digests, sample fingerprints, Merkle roots, and dataset fingerprints, ensuring dataset fingerprint $\neq$ Merkle root.
+    - **Merkle Tree Inclusion Proof Verification:** Validates inclusion proofs across all leaves, verifying deterministic re-computation and ensuring rejection of tampered leaf hashes, mutated sibling hashes, invalid tree roots, wrong leaf positions, and mismatched cross-dataset proofs.
+    - **Near-Duplicate Detection Verification:** Validates pHash, dHash, Hamming distance calculations, threshold modifications, and cluster assignment consistency without accusatory classifications.
+    - **Label Anomaly & Confident Learning Semantics:** Enforces clear separation between observed labels, latent estimates ($y^*$), and ground truth; validates out-of-fold probability handling and singleton/small-sample guardrails.
+    - **Targeted Label Flipping Verification:** Tests directional transition asymmetry, reciprocal confusion filtering, Wilson confidence lower bounds, noise concentration index, and non-accusatory reporting.
+    - **OOD & Physical Image Quality Independence:** Proves independent measurement dimensions across luminance, blur/sharpness, underexposure/overexposure, and Tier 1 statistical feature fallback behavior without conflating with deep embeddings.
+    - **Contributor Aggregation Engine:** Verifies $1/K$ fractional attribution conservation, Wilson confidence intervals, leave-one-out baselines, and non-accusatory contributor profile findings (0 "guilt" scores).
+    - **Evidence Identity & Execution Identity:** Tests strict RFC 8785 canonical serialization, deterministic evidence hash generation excluding non-semantic fields (UUIDs, timestamps, paths), and complete 11-parameter execution identity hashing with normalization.
+    - **Finding $\to$ Evidence Traceability Graph & Provenance Verification:** Validates primary evidence linkage, derived secondary evidence citations, backward traceability chains, and all 6 frozen cryptographic provenance states (`VERIFIED`, `INVALID`, `MISSING`, `UNAVAILABLE`, `MISMATCHED`, `UNVERIFIABLE`).
+    - **Cross-Project Security Testing:** Adversarial multi-tenant rejection of cross-project evidence binding, finding association, execution contamination, and provenance linkage.
+    - **Partial Scan Semantics:** Verifies that sample-limited scans strictly yield `PARTIAL` status and never elevate to `FULL_DATASET_VERIFIED`.
+    - **12 Architectural Invariants:** Explicit automated tests enforcing all 12 core system invariants.
+    - **Thread Safety & Restart Semantics:** Validates thread-safe concurrent scan initiation and clean separation between in-process task state and durable database/audit/cryptographic records.
+- [x] Full Regression Status:
+  - **Baseline:** 717 passed
+  - **New Phase 5.11 Tests:** 33 passed
+  - **Final Total:** 750 passed, 0 failed, 0 skipped, 0 xfailed.
+- [x] Constraints Verification:
+  - 0 Database schema changes (0 migrations, 0 new tables).
+  - 0 Phase 4 Cryptographic modifications.
+  - 0 Phase 5.9 Evidence engine modifications.
+  - 0 Frontend modifications.
+  - 0 Risk engine modifications.
+  - 0 Network / Cloud / External Queue dependencies.
 
 ## Phase 5.10 Completed Deliverables
 - [x] Implemented REST API Schemas (`backend/aivara/api/schemas/`):
