@@ -12,7 +12,7 @@
 | **PHASE 1** | Environment Validation & Prerequisites Check | **COMPLETE** | 2026-08-31 |
 | **PHASE 2** | Repository Foundation & Minimal Backend Skeleton | **COMPLETE** | 2026-08-31 |
 | **PHASE 3** | Domain Model & Relational Database Schema Implementation | **COMPLETE** | 2026-09-01 |
-| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **IN PROGRESS** (4.1–4.13 Complete) | In Progress |
+| **PHASE 4** | Core Assurance Engines & Cryptographic Provenance | **COMPLETE** | 2026-09-08 |
 | **PHASE 4.1** | Cryptographic Provenance Engine Design Review | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.2** | Canonical Serialization Engine (RFC 8785 / JCS) | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.3** | SHA-256 Hashing Engine & Canonical Bridge | **COMPLETE** | 2026-09-05 |
@@ -25,7 +25,221 @@
 | **PHASE 4.12** | REST API Integration & Thin Router Adapters | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.13** | Cryptographic Tamper-Evident Audit Logging | **COMPLETE** | 2026-09-05 |
 | **PHASE 4.14** | Comprehensive Security Testing (ST-01 to ST-10) | **COMPLETE** | 2026-09-06 |
-| **PHASE 4.15** | Attack Lab & Tampering Demonstrations | **NOT STARTED** | Pending User Authorization |
+| **PHASE 4.15** | Attack Lab & Tampering Demonstrations | **COMPLETE** | 2026-09-08 |
+| **PHASE 5** | Dataset Integrity Engine | **IN PROGRESS** | — |
+| **PHASE 5.1** | Dataset Integrity Architecture Review & Design Freeze | **COMPLETE** | 2026-09-08 |
+| **PHASE 5.2** | Ingestion & Normalization Engine (COCO, YOLO, ImageFolder) | **COMPLETE** | 2026-09-08 |
+| **PHASE 5.3** | Multi-Tier Fingerprinting & Merkle Tree Integrity Engine | **COMPLETE** | 2026-09-09 |
+| **PHASE 5.3.1** | Fingerprinting & Merkle Architecture Review + Design Freeze | **COMPLETE** | 2026-09-09 |
+| **PHASE 5.4** | Near-Duplicate Detection Engine (MIH / BK-Tree Scalable) | **COMPLETE** | 2026-09-09 |
+| **PHASE 5.5** | Label Anomaly & Confident Learning Detection Engine | **COMPLETE** | 2026-09-09 |
+| **PHASE 5.5.1** | Label Anomaly Architecture Review + Design Freeze | **COMPLETE** | 2026-09-09 |
+| **PHASE 5.6** | Targeted Label-Flipping Detection Engine | **COMPLETE** | 2026-09-10 |
+| **PHASE 5.6.1** | Label-Flipping Architecture Review & Design Freeze | **COMPLETE** | 2026-09-09 |
+| **PHASE 5.7** | Out-of-Distribution (OOD) & Image Quality Engine | **NOT STARTED** | — |
+| **PHASE 5.8** | Contributor Risk Aggregation Engine | **NOT STARTED** | — |
+| **PHASE 5.9** | Evidence Generation & Provenance Ledger Integration | **NOT STARTED** | — |
+| **PHASE 5.10** | REST API Adapters & Engine Orchestration Service | **NOT STARTED** | — |
+| **PHASE 5.11** | Comprehensive Phase 5 Test Suite & Performance Verification | **NOT STARTED** | — |
+
+---
+
+## Phase 5.6 Completed Deliverables
+- [x] Implemented Label-Flipping Detection Engine package (`backend/aivara/dataset/flipping/`):
+  - **Mathematical Core & Metrics (`metrics.py`):**
+    - Unnormalized integer transition count matrix $N_{i, j} = |\{n : \tilde{y}_n = i \text{ and } \hat{y}^*_n = j\}|$ (`compute_transition_count_matrix`).
+    - Row-normalized conditional transition rate matrix $T_{i \to j} = P(\hat{y}^* = j \mid \tilde{y} = i)$ summing to 1.0 per row (`compute_row_normalized_transition_rates`).
+    - Directional Asymmetry Index $\text{Asym}(i, j) = \frac{N_{i, j} - N_{j, i}}{N_{i, j} + N_{j, i}} \in [-1.0, 1.0]$ (`compute_directional_asymmetry`).
+    - Noise Concentration Index $\text{NCI}_{i \to j} = \frac{N_{i, j}}{\sum_{k \ne i} N_{i, k}} \in [0.0, 1.0]$ (`compute_noise_concentration_index`).
+    - Asymptotic sigmoid Support Discount function $\text{SupportDiscount}(n)$ (`compute_support_discount`).
+    - Composite Targeted Flipping Score $\text{TFS}_{i \to j} = \text{SupportDiscount}(N_{i, j}) \times T_{i \to j} \times \max(0.0, \text{Asym}(i, j)) \times \text{NCI}_{i \to j}$ (`compute_targeted_flip_score`).
+    - Conservative 95% Wilson Score Interval Lower Bound $w^{-}(p, n)$ (`compute_wilson_lower_bound`).
+  - **Detection & Orchestration Engine (`detector.py`):**
+    - High-level orchestrator (`LabelFlipDetector`, `detect_label_flipping`) evaluating classification samples and localized object-detection RoI bounding boxes.
+    - Model-Bias Control Triad: Reciprocal Filter ($|\text{Asym}| \le 0.35$ tagged as `RECIPROCAL_CLASS_CONFUSION`, `is_targeted=False`), Multi-Class Dispersion Filter, and Average Latent Margin constraint.
+    - Many-to-One Class Collapse detection ($\ge 3$ source classes systematically targeting single sink class).
+    - Contributor transition differential analysis $\Delta T_{i \to j}^{(c)} = T_{i \to j}^{(c)} - T_{i \to j}^{(\text{dataset}\setminus c)}$ with small-contributor sample protections.
+    - Small dataset ($N < 25$), rare class ($< 5$ samples), and sparse transition ($N_{i, j} < 3$) guardrails.
+    - Model state machine failure handling (`MODEL_AVAILABLE`, `MODEL_UNAVAILABLE`, `MODEL_INCOMPATIBLE`, `MODEL_LOAD_FAILED`) with zero fabricated synthetic probabilities.
+    - Strict semantic invariant: $\text{LABEL-FLIPPING EVIDENCE} \ne \text{MALICIOUSNESS}$, `evidence_layer="detection"`.
+  - **Immutable Domain Schemas (`schemas.py`) & Exceptions (`exceptions.py`):**
+    - Frozen Pydantic models (`LabelFlipCategory`, `LabelFlipConfig`, `LabelTransitionPair`, `ContributorTransitionSummary`, `LabelFlipFinding`, `LabelFlipScanResult`).
+- [x] Dedicated test suite (`tests/test_label_flipping.py`): 22/22 unit tests covering all 35 mandated architectural scenarios.
+- [x] Full regression test suite: 602/602 tests passing (100%).
+- [x] Zero database schema mutations.
+- [x] Zero Phase 4 cryptographic code changes.
+- [x] 100% offline air-gapped execution.
+
+
+---
+
+## Phase 5.6.1 Completed Deliverables
+- [x] Produced comprehensive Label-Flipping Detection Engine Architecture Specification ([`docs/LABEL_FLIPPING_ARCHITECTURE.md`](file:///d:/Downloads/Projects/AiVara/docs/LABEL_FLIPPING_ARCHITECTURE.md)):
+  - **Core Semantic Invariant:** Preserved strict foundational rule: $\text{LABEL-FLIPPING EVIDENCE} \ne \text{MALICIOUSNESS}$. All findings belong to ADR-028 `evidence_layer="detection"`.
+  - **Granular Analytical Taxonomy:** Formalized distinction between Isotropic Random Noise, Class-Dependent Noise, Reciprocal Class Confusion ($A \leftrightarrow B$), Directional Label Transition ($A \to B$), Targeted Label Flipping ($A \implies B$), Many-to-One Class Collapse, One-to-Many Dispersion, Contributor-Associated Transitions, and Sparse Isolated Anomalies.
+  - **Mathematical Formulation:** Defined row-normalized conditional transition matrix $T_{i \to j} = P(\hat{y}^* = j \mid \tilde{y} = i)$, Directional Asymmetry Index $\text{Asym}(i, j)$, Noise Concentration Index $\text{NCI}_{i \to j}$, and Targeted Flipping Score ($\text{TFS}_{i \to j}$).
+  - **Small-Sample Uncertainty:** Integrated conservative Wilson Score interval lower bounds ($w^{-}$) and asymptotic support discounting functions.
+  - **Model-Bias & Natural Confusion Controls:** Formalized model-bias control triad (reciprocal filter for symmetric boundary overlaps, dispersion filter for multi-class confusion, and mean latent margin constraints).
+  - **Contributor-Specific Differentials:** Formalized contributor transition rate differentials $\Delta T_{i \to j}^{(c)}$ as purely descriptive statistical signals for Phase 5.8 aggregation without premature culpability assignments.
+  - **Guardrails:** Aligned with frozen Phase 5.5 guardrails ($N < 25$, class count $< 5$, transition support $N_{i, j} < 3$, singleton class $N=1$).
+  - **Domain Models & Pre-Implementation Test Strategy:** Defined immutable Pydantic schemas and 24-scenario test strategy.
+  - **Zero Database Schema Mutations & Zero Production Code Changes:** Verified design-only integrity.
+
+
+---
+
+## Phase 5.5 Completed Deliverables
+- [x] Implemented Label Anomaly & Confident Learning Detection Engine package (`backend/aivara/dataset/anomalies/`):
+  - **Deterministic Stratified $K$-Fold Cross-Validation Partitioner (`folds.py`):**
+    - Cryptographic SHA-256 seeding (`generate_deterministic_seed`) binding random seed and dataset fingerprint.
+    - Zero data leakage guarantee: strict disjointness between train and test partitions (`deterministic_stratified_kfold_split`).
+    - Class stratification preserving sample proportions across folds deterministically.
+  - **Confident Learning Mathematical Core (`confident_learning.py`):**
+    - Class-specific empirical confident thresholds $t_j = \frac{1}{|\mathcal{X}_j|} \sum_{x \in \mathcal{X}_j} \hat{P}(y = j \mid x)$ (`compute_class_thresholds`).
+    - Unnormalized integer confident count matrix $C_{i, j}$ (`compute_confident_count_matrix`).
+    - Normalized joint distribution matrix $\hat{Q}_{i, j}$ summing to 1.0 (`compute_joint_distribution_matrix`).
+    - Confident margin $\text{Margin}_n = (\hat{P}(y=j^* \mid x_n) - t_{j^*}) - (\hat{P}(y=i \mid x_n) - t_i)$ and sigmoid anomaly score $S_n \in [0.0, 1.0]$ (`compute_sample_anomaly_metrics`).
+    - Systematic reciprocal class confusion analysis (`identify_systematic_anomalies`).
+  - **Detector-Side Temporary Estimator (`estimator.py`):**
+    - Lightweight nearest centroid classifier with softmax probability calibration (`DetectorSideCentroidEstimator`).
+    - NO BASELINE RETRAINING invariant: Customer/baseline models are never fine-tuned or retrained; only frozen features are evaluated.
+    - Zero data leakage OOF estimation with per-fold normalizer fitting (`compute_out_of_fold_probabilities`).
+  - **Orchestration & Detection Engine (`detector.py`):**
+    - Analytical unit extraction for Classification (ImageFolder) and Object Detection bounding-box class auditing (`LabelAnomalyDetector`).
+    - Air-gapped model state machine handling (`MODEL_AVAILABLE`, `MODEL_UNAVAILABLE`, `MODEL_INCOMPATIBLE`, `MODEL_LOAD_FAILED`) with zero fabricated probabilities.
+    - Small dataset ($N < 25$) and rare class ($< 5$ samples, 50% discount) guardrails.
+    - Complete taxonomic categorization: `POSSIBLE_LABEL_MISMATCH`, `HIGH_CONFIDENCE_ALTERNATIVE_CLASS`, `CLASS_SYSTEMATIC_ANOMALY`, `RARE_CLASS_ANOMALY`, `MODEL_DISAGREEMENT`, `INSUFFICIENT_EVIDENCE`, `MODEL_UNAVAILABLE`.
+    - Strict semantic invariant: `LABEL ANOMALY ≠ MALICIOUSNESS`, `evidence_layer="detection"`.
+  - **Immutable Domain Schemas (`schemas.py`) & Domain Exceptions (`exceptions.py`):**
+    - Frozen Pydantic models (`ModelState`, `LabelAnomalyCategory`, `LabelAnomalyConfig`, `LabelPrediction`, `LabelAnomalyEvidence`, `LabelAnomalyFinding`, `LabelAnomalyScanResult`).
+- [x] Dedicated test suite (`tests/test_label_anomalies.py`): 24/24 unit tests covering all 25 mandated scenarios.
+- [x] Full regression test suite: 580/580 tests passing (100%).
+- [x] Zero database migrations/mutations.
+- [x] Zero Phase 4 cryptographic code changes.
+- [x] 100% offline air-gapped execution.
+
+- [x] Produced comprehensive Label Anomaly & Confident Learning Detection Engine Architecture Specification ([`docs/LABEL_ANOMALY_ARCHITECTURE.md`](file:///d:/Downloads/Projects/AiVara/docs/LABEL_ANOMALY_ARCHITECTURE.md)):
+  - **Scope & Modalities:** Full support for classification labels (ImageFolder) and object detection bounding-box class labels (COCO/YOLO localized RoI evaluation); explicit rejection of unsupported continuous/mask tasks as `UNVERIFIABLE`.
+  - **Statistical Noise Formulation:** Formalized joint label noise transition matrix $\mathbf{Q}_{\tilde{y}, y^*}$ estimating latent true labels $y^*$ against observed labels $\tilde{y}$ without assuming perfect ground truth.
+  - **Confident Learning Algorithm:** Defined class-specific confident thresholds ($t_j$), integer count matrix ($C_{i, j}$), threshold-normalized margin scoring, and normalized joint distribution matrix ($\hat{Q}_{i, j}$).
+  - **Out-of-Fold Cross-Validation:** Stratified 5-fold CV protocol with deterministic partitioning via SHA-256 seeding to eliminate training data leakage.
+  - **No-Baseline-Retraining Invariant:** Strictly prohibits fine-tuning or modifying customer model weights; authorizes frozen offline feature extractors and lightweight temporary linear/probabilistic estimators.
+  - **Air-Gapped Model State Machine:** Explicit resolution across `MODEL_AVAILABLE`, `MODEL_UNAVAILABLE`, `MODEL_INCOMPATIBLE`, `MODEL_LOAD_FAILED` with zero fabricated predictions.
+  - **Guardrails:** Explicit handling for small datasets ($N < 25$), rare classes ($< 5$ samples), and severe class imbalance ($> 50:1$).
+  - **Taxonomic Anomaly Categories:** `POSSIBLE_LABEL_MISMATCH`, `HIGH_CONFIDENCE_ALTERNATIVE_CLASS`, `CLASS_SYSTEMATIC_ANOMALY`, `RARE_CLASS_ANOMALY`, `MODEL_DISAGREEMENT`, `INSUFFICIENT_EVIDENCE`, `MODEL_UNAVAILABLE`.
+  - **Strict Semantic Invariant:** Findings strictly express statistical noise under ADR-028 `evidence_layer="detection"` with zero maliciousness declarations.
+  - **Zero Database Schema Mutations:** Mapped to existing `FindingModel` and `EvidenceModel`.
+- [x] Full regression test suite passing: 556/556 tests passing (100%).
+
+---
+
+## Phase 5.4 Completed Deliverables
+- [x] Implemented Near-Duplicate Detection Engine and Metric Indexing package (`backend/aivara/dataset/duplicates/`):
+  - **Perceptual Hashing Core (`perceptual.py`):**
+    - 64-bit **pHash** (2D Discrete Cosine Transform): Normalizes EXIF orientation, flattens alpha transparency over solid white, resizes to $32 \times 32$ grayscale, computes 2D DCT-II to extract top-left $8 \times 8$ low frequencies, thresholds against AC median, and packs into 64-bit uint / 16-hex char digest (`compute_phash`).
+    - 64-bit **dHash** (Spatial Gradient Difference Hash): Resizes to $9 \times 8$ grayscale, compares horizontal pixel pairs $P(x+1, y) > P(x, y)$, and packs into 64-bit uint / 16-hex char digest (`compute_dhash`).
+  - **Hardware-Accelerated Hamming Distance (`distance.py`):** POPCNT bitwise integer distance computation (`hamming_distance`, `hamming_distance_uint64`) operating in $< 20\text{ ns}$.
+  - **BK-Tree Metric Index (`bktree.py`):** Tree index with triangle inequality radius pruning ($d(Q, P) - r \le k \le d(Q, P) + r$), providing sub-quadratic candidate retrieval.
+  - **Multi-Index Hashing (`mih.py`):** 4-block 16-bit inverted index candidate table exploiting the Pigeonhole Principle for $O(1)$ sub-block bucket lookups.
+  - **Duplicate Detection & Graph Clustering Orchestrator (`detector.py`):**
+    - Dual-hash candidate verification and composite similarity scoring $[0.0, 1.0]$.
+    - Configurable matching strategies (`MATCH_BOTH`, `MATCH_ANY`, `WEIGHTED`).
+    - Deterministic connected-component clustering (`NearDuplicateCluster`) with stable cluster IDs (`cluster_{min_id}_{digest}`).
+    - Contributor attribution preservation across relationships and clusters.
+    - Strict semantic boundary invariant: Emits neutral similarity evidence with zero maliciousness declarations or threat conclusions.
+  - **Immutable Domain Models (`schemas.py`):** Frozen Pydantic models (`PerceptualFingerprint`, `NearDuplicateConfig`, `NearDuplicateRelationship`, `NearDuplicateCluster`, `NearDuplicateScanResult`).
+- [x] Produced comprehensive architecture & reference specification (`docs/NEAR_DUPLICATE_DETECTION.md`).
+- [x] Zero database mutations: Preserved existing database schema completely untouched.
+- [x] Zero Phase 4 cryptographic code changes: Preserved all Phase 4 cryptographic files strictly untouched.
+- [x] 100% offline execution: Guaranteed zero network requests, zero cloud API calls, and zero telemetry.
+- [x] Dedicated test suite (`tests/test_near_duplicates.py`): 27/27 passing unit tests covering all 30 mandated scenarios.
+- [x] Full regression test suite: 556/556 tests passing (100%).
+
+---
+
+## Phase 5.3 Completed Deliverables
+- [x] Implemented multi-tier cryptographic fingerprinting and Merkle tree assurance package (`backend/aivara/dataset/fingerprinting/`):
+  - **Level 0 — Raw File Digest (`raw.py`):** 64 KiB bounded chunked streaming SHA-256 (`compute_raw_image_sha256`) ensuring constant $O(1)$ memory usage.
+  - **Level 1 — Decoded sRGB 8-Bit Pixel Digest (`pixels.py`):** Deterministic uncompressed sRGB 8-bit row-major pixel buffer digest (`compute_decoded_rgb_sha256`) with `aivara-pixels-v1:W:H:C:` prefix, EXIF transposition normalization, alpha channel flattening over opaque white backdrop `(255, 255, 255)`, and grayscale expansion to 3-channel RGB.
+  - **Level 2 — Canonical Annotation Set Digest (`annotations.py`):** RFC 8785 JCS-canonicalized dictionary encoding with 4-decimal place coordinate quantization, single annotation digest (`aivara-annot-v1:` prefix), and deterministic binary-collated composite set digest (`compute_annotation_set_hash`) with `aivara-annotset-v1:empty` constant.
+  - **Level 3 — Canonical Sample Fingerprint (`sample.py`):** Versioned RFC 8785 JCS container binding raw file hash, pixel hash, annotation set hash, dimensions, path, and sorted contributors under `aivara-sample-v1:` prefix (`compute_sample_fingerprint`).
+  - **Level 4 — RFC 6962 Binary Merkle Tree (`merkle.py`):** Binary Merkle tree engine with 1-byte domain separation (`0x00` leaf prefix, `0x01` internal node prefix), deterministic leaf ordering by POSIX relative path (UTF-8 binary collation), duplicate path/ID rejection, balanced power-of-2 splitting ($k = 2^{\lfloor \log_2(N-1) \rfloor}$) eliminating CVE-2012-2459 node duplication attacks, and `SHA-256("aivara-empty-tree-v1")` empty tree root.
+  - **Dataset Manifest Digest (`dataset.py`):** Top-level RFC 8785 manifest digest binding format, dataset name, sample counts, category hierarchy, and `dataset_merkle_root` under `aivara-dataset-v1:` prefix (`compute_dataset_hash`).
+  - **Merkle Inclusion Proofs (`proofs.py`):** Schema and logarithmic $O(\log N)$ algorithms for generating (`generate_inclusion_proof`) and cryptographically verifying (`verify_inclusion_proof`) inclusion proofs in constant time with tamper resistance.
+  - **Orchestration Engine (`engine.py`):** End-to-end dataset fingerprinting pipeline (`DatasetFingerprintEngine`, `fingerprint_dataset`).
+- [x] Zero database mutations: Preserved existing database schema completely untouched.
+- [x] Zero Phase 4 cryptographic code changes: Reused Phase 4 hashing and canonicalization primitives without modifying Phase 4 behavior.
+- [x] 100% offline air-gapped execution: Zero external network or telemetry dependencies.
+- [x] Comprehensive test suite (`tests/test_fingerprinting_merkle.py`): 43/43 unit tests passing in ~3.1s.
+- [x] Full regression test suite: 529/529 tests passing (100%) in 80.92s.
+
+---
+
+## Phase 5.3.1 Completed Deliverables
+- [x] Produced comprehensive Multi-Tier Fingerprinting & Merkle Tree Integrity Architecture Specification ([`docs/FINGERPRINTING_MERKLE_ARCHITECTURE.md`](file:///d:/Downloads/Projects/AiVara/docs/FINGERPRINTING_MERKLE_ARCHITECTURE.md)):
+  - **Level 0 (Raw File Digest):** 64 KiB chunked streaming SHA-256 over exact file bytes on disk (`raw_image_sha256`).
+  - **Level 1 (Decoded Pixel Digest):** Deterministic sRGB 8-bit row-major uncompressed pixel buffer digest (`decoded_rgb_sha256`) prefixed with `aivara-pixels-v1:W:H:C:`, invariant across lossless container resaves, metadata stripping, and container format conversions.
+  - **Level 2 (Annotation Digest):** Canonical RFC 8785 JCS serialization with 4-decimal place float quantization and lexicographically sorted binary annotation set hash (`annotation_set_hash`).
+  - **Level 3 (Canonical Sample Fingerprint):** Composite JCS-canonicalized dictionary binding raw file hash, pixel hash, annotation set hash, image dimensions, path, and contributors (`sample_fingerprint`).
+  - **Level 4 (RFC 6962 Binary Merkle Tree):** Deterministic leaf collation by UTF-8 relative path, 1-byte domain separation (`0x00` leaf prefix, `0x01` internal node prefix), and balanced power-of-2 splitting avoiding node duplication vulnerabilities (CVE-2012-2459).
+  - **Dataset Identifiers:** Defined distinction between `dataset_merkle_root` (sample tree root) and `dataset_hash` (manifest container anchor).
+  - **Inclusion Proofs:** Formalized `MerkleInclusionProof` schema and $O(\log N)$ logarithmic verification algorithm.
+  - **Zero Database Schema Mutations:** Zero database migrations/table changes.
+  - **Zero Cryptographic Code Mutations:** Preserved all Phase 4 cryptographic files strictly untouched.
+- [x] Verified full regression test suite: 486/486 tests passing (100%).
+
+---
+
+## Phase 5.2 Completed Deliverables
+- [x] Implemented standalone dataset ingestion and canonical normalization domain package (`backend/aivara/dataset/`):
+  - **Domain Exception Taxonomy** (`backend/aivara/dataset/exceptions.py`): Structured, machine-readable exceptions (`DatasetIngestionError`, `UnsupportedDatasetFormatError`, `AmbiguousDatasetFormatError`, `MalformedDatasetError`, `MalformedAnnotationError`, `InvalidImageError`, `CorruptedImageError`, `MissingImageError`, `InvalidCategoryError`, `InvalidIdentifierError`, `PathTraversalError`, `SymlinkEscapeError`, `InvalidCoordinateError`, `InvalidDatasetConfigError`). Sanitizes paths to prevent absolute host path or environment leaks.
+  - **Immutable Canonical Schema** (`backend/aivara/dataset/schemas.py`): Frozen Pydantic models with `extra="forbid"`, `frozen=True` (`CanonicalBBox`, `CanonicalAnnotation`, `CanonicalCategory`, `CanonicalSample`, `CanonicalDatasetManifest`, `DatasetIngestionResult`, `DatasetFormat`).
+  - **Deterministic Path Security & Sandboxing** (`backend/aivara/dataset/path_security.py`): Enforces POSIX forward slashes, relative paths, rejection of `..` traversal, rejection of Windows drive letters/UNC paths, and resolves real paths to prevent symlink escapes outside the dataset root trust boundary.
+  - **Sandboxed Image Header Validator** (`backend/aivara/dataset/image_validator.py`): Pure-Python, streaming header inspection for PNG, JPEG, WebP, BMP, and TIFF formats. Extracts dimensions, color spaces, and channels without full-decompression memory bombs.
+  - **Dataset Format Sniffer** (`backend/aivara/dataset/detector.py`): Structural detector distinguishing COCO (`.json`), YOLO (`dataset.yaml`), and ImageFolder, with strict rejection of ambiguous or unsupported datasets.
+  - **COCO Parser** (`backend/aivara/dataset/parsers/coco.py`): Parses standard object detection annotations, polygons, and categories. Validates referential integrity, positive dimensions, unique IDs, and sorts samples/annotations deterministically by relative path and bbox coordinates.
+  - **YOLO Parser** (`backend/aivara/dataset/parsers/yolo.py`): Parses `dataset.yaml` metadata, class mapping lists/dicts, and normalized coordinate `.txt` annotations. Transforms center-normalized coordinates into absolute top-left format without loss of source semantics, validating `[0.0, 1.0]` bounds.
+  - **ImageFolder Parser** (`backend/aivara/dataset/parsers/imagefolder.py`): Traverses directory hierarchies mapping direct parent directory names to class labels, skipping hidden/ignored files and empty directories deterministically.
+  - **Dataset Ingester Orchestrator** (`backend/aivara/dataset/ingester.py`): Provides single-point entry `ingest_dataset()` and `DatasetIngester` class with optional strict/lenient validation and batch size controls.
+- [x] Zero database mutations: Preserved existing database schema completely unchanged (zero migrations, zero model modifications).
+- [x] Zero cryptographic code changes: Preserved all Phase 4 cryptographic files and behaviors strictly untouched.
+- [x] 100% offline execution: Guaranteed zero network requests, zero telemetry, and zero remote dependencies.
+- [x] Comprehensive automated test suite (`tests/test_dataset_ingestion.py`): 39/39 passing unit tests covering all 30 mandated scenarios.
+- [x] Full regression test suite: 486/486 tests passing (100%) in 79.47s.
+
+---
+
+## Phase 5.1 Completed Deliverables
+- [x] Produced comprehensive Dataset Integrity Engine Architecture & Design Freeze specification (`docs/DATASET_INTEGRITY_ARCHITECTURE.md`) covering all 28 required architectural dimensions:
+  - **Scope & Non-Goals**: Defined computer vision scope (COCO, YOLO, ImageFolder, raster formats) and explicit exclusions (no retraining, no mutation, no cloud APIs, no live streams).
+  - **Existing Architecture Integration**: Mapped integration with existing `DatasetModel`, `DatasetVersionModel`, `SampleModel`, `SampleContributorModel`, `FindingModel`, `EvidenceModel`, `AuditEventModel`, and `ProvenanceRecordModel`.
+  - **Dataset Ingestion & Normalization**: Designed format sniffers, sandboxed path validation, and canonical schema (`CanonicalSample`, `CanonicalAnnotation`, `CanonicalBBox`).
+  - **Multi-Tier Fingerprinting**: Designed Merkle Root dataset integrity, bit-exact SHA-256 digests, raw pixel buffer hashes, perceptual hashing (pHash/dHash), and canonical annotation tuple hashes.
+  - **Detection Engines Architecture**: Detailed specifications for Label Anomaly Detection (confident learning / out-of-fold estimation), Targeted Label-Flipping Detection (asymmetric error transition matrix & cluster impurity), Near-Duplicate Detection ($O(N \log N)$ BK-Tree / Multi-Index Hashing), and OOD / Quality Degradation Detection.
+  - **Contributor Risk Aggregation**: Formalized Error Concentration Ratio ($\text{ECR}$) and systematic annotator bias scoring under ADR-029 schema.
+  - **Semantic Boundaries & Invariant**: Formalized strict taxonomic distinction separating `NORMAL`, `ANOMALOUS`, `SUSPICIOUS`, and `UNVERIFIABLE` from downstream `MALICIOUS` conclusions.
+  - **Offline & Graceful Degradation**: 100% air-gapped guarantees with 2-tier fallback when deep visual embedding models are absent.
+  - **Testing & Security Strategy**: Defined 12 dedicated test suites (TEST-DIE-01 to TEST-DIE-12), anti-DoS decompression bounds, safe JSON/YAML loading, and sub-phase implementation roadmap (Phase 5.1 to 5.11).
+- [x] Verified zero production code modifications during design phase.
+- [x] Full regression test suite passing: 447/447 tests passing (100%).
+
+---
+
+## Phase 4.15 Completed Deliverables
+- [x] Implemented and stabilized all 10 canonical Attack & Tampering Demonstration Lab scenarios (`backend/aivara/attack_lab/scenarios/`):
+  - **ATTACK-01 (Provenance Record Tampering)**: Demonstrated single-field mutation across 17 distinct protected fields (`input_hash`, `output_hash`, `model_id`, `model_weight_digest`, `config_hash`, `nonce`, `sequence_number`, `previous_record_hash`, `project_id`, `target_type`, `target_id`, `metadata_json`, `actor`, `action`, `record_type`, `timestamp`, `schema_version`) with 100% detection rate as `RECORD_HASH_MISMATCH` / `integrity_violation`.
+  - **ATTACK-02 (Digital Signature Forgery)**: Demonstrated 8 targeted signature attack vectors (valid signature, post-signing payload mutation, bit corruption in signature bytes, malformed base64 encodings, unknown signer key, mismatched key ID, signing with revoked key, historical validity preservation) with 100% detection.
+  - **ATTACK-03 (Replay Attack)**: Demonstrated authoritative database rejection of duplicate nonce and sequence submissions, verified `PROVENANCE_REPLAY_REJECTED` persistent audit logging, verified audit chain validity, and verified uncorrupted original record preservation.
+  - **ATTACK-04 (Audit Event Tampering)**: Demonstrated raw-SQL mutation of intermediate audit events (`audit_events` payload), verified detection as `AUDIT_INTEGRITY_VIOLATION` (`EVENT_HASH_MISMATCH`), and verified reversible state restoration.
+  - **ATTACK-05 (Direct Database Tampering)**: Executed 8 raw SQL operations bypassing SQLAlchemy ORM listeners (`UPDATE description`, `UPDATE metadata_json`, `UPDATE event_hash`, `UPDATE previous_event_hash`, `UPDATE sequence_number`, `UPDATE project_id`, `DELETE middle event`, `INSERT forged event`), proving that cryptographic hash chain independently detects database tampering while ORM listeners are defense-in-depth.
+  - **ATTACK-06 (Provenance Chain Manipulation)**: Executed 9 topological, structural, and linkage attacks on 5-record chains (delete middle record, reorder records, modify payload in-place, modify previous hash, modify sequence, create sequence gap, manipulate genesis action, insert forged record, alter project scoping) with 100% detection across failure taxonomy.
+  - **ATTACK-07 (Cross-Project Evidence Substitution)**: Demonstrated multi-tenant isolation across record, chain, and audit layers, strictly detecting cross-project splicing as `PROJECT_MISMATCH`.
+  - **ATTACK-08 (Key Lifecycle Attack)**: Verified cryptographic decoupling of signing authority from historical verification authority across `ROTATED`, `REVOKED`, and `EXPIRED` states.
+  - **ATTACK-09 (Combined Multi-Layer Attack)**: Simultaneously attacked Layer B (payload), Layer C (chain linkage), Layer D (signature), and Audit logging, proving that all individual failure codes are preserved without diagnostic masking.
+  - **ATTACK-10 (Attack Lifecycle & Restoration)**: Executed multiple consecutive attack-detect-restore-verify cycles, proving complete reproducibility, deterministic behavior, and zero residual database corruption.
+- [x] Implemented Attack Lab CLI runner (`python -m aivara.attack_lab list` and `python -m aivara.attack_lab run --all [--json]`).
+- [x] Implemented Attack Lab REST API router (`GET /api/v1/attack_lab/status`, `GET /api/v1/attack_lab/scenarios`, `GET /api/v1/attack_lab/scenarios/{id}`, `POST /api/v1/attack_lab/run/{id}`, `POST /api/v1/attack_lab/run_all`).
+- [x] Implemented dedicated automated test suite (`tests/test_attack_lab.py`) with 20/20 tests passing in ~4.8s.
 
 ---
 
