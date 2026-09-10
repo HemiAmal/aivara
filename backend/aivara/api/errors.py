@@ -16,6 +16,22 @@ from aivara.crypto.chain import (
 logger = get_logger(__name__)
 
 
+from aivara.dataset.exceptions import (
+    DatasetIngestionError,
+    PathTraversalError,
+    SymlinkEscapeError,
+)
+from aivara.evidence.exceptions import (
+    CrossProjectContaminationError,
+    EvidenceError,
+    EvidenceValidationError,
+    ModelMismatchError,
+    MissingProvenanceError,
+    StaleDatasetVersionError,
+    VocabularyViolationError,
+)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach global exception handlers producing standardized JSON responses."""
 
@@ -23,12 +39,57 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(DuplicateSequenceError)
     @app.exception_handler(DuplicateRecordError)
     @app.exception_handler(ReplayDetectedError)
-    async def replay_detected_handler(request: Request, exc: AivaraException):
-        logger.warning("Replay detected: %s (code=%s)", exc.message, exc.code)
+    @app.exception_handler(StaleDatasetVersionError)
+    @app.exception_handler(ModelMismatchError)
+    async def conflict_error_handler(request: Request, exc: Exception):
+        msg = getattr(exc, "message", str(exc))
+        code = getattr(exc, "code", "CONFLICT_ERROR")
+        details = getattr(exc, "details", None)
+        logger.warning("Resource conflict: %s (code=%s)", msg, code)
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content=ApiErrorResponse(
+                error=ErrorDetail(code=code, message=msg, details=details),
+                meta=ResponseMeta(),
+            ).model_dump(),
+        )
+
+    @app.exception_handler(MissingProvenanceError)
+    async def missing_provenance_handler(request: Request, exc: MissingProvenanceError):
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=ApiErrorResponse(
                 error=ErrorDetail(code=exc.code, message=exc.message, details=exc.details),
+                meta=ResponseMeta(),
+            ).model_dump(),
+        )
+
+    @app.exception_handler(CrossProjectContaminationError)
+    @app.exception_handler(VocabularyViolationError)
+    @app.exception_handler(EvidenceValidationError)
+    async def domain_validation_error_handler(request: Request, exc: Exception):
+        msg = getattr(exc, "message", str(exc))
+        code = getattr(exc, "code", "VALIDATION_ERROR")
+        details = getattr(exc, "details", None)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=ApiErrorResponse(
+                error=ErrorDetail(code=code, message=msg, details=details),
+                meta=ResponseMeta(),
+            ).model_dump(),
+        )
+
+    @app.exception_handler(PathTraversalError)
+    @app.exception_handler(SymlinkEscapeError)
+    @app.exception_handler(DatasetIngestionError)
+    async def dataset_security_error_handler(request: Request, exc: Exception):
+        msg = getattr(exc, "message", str(exc))
+        code = getattr(exc, "code", "DATASET_SECURITY_ERROR")
+        details = getattr(exc, "details", None)
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ApiErrorResponse(
+                error=ErrorDetail(code=code, message=msg, details=details),
                 meta=ResponseMeta(),
             ).model_dump(),
         )

@@ -42,8 +42,33 @@
 | **PHASE 5.8.1** | Contributor Aggregation Architecture Review & Design Freeze | **COMPLETE** | 2026-09-10 |
 | **PHASE 5.9** | Evidence Generation & Provenance Ledger Integration | **COMPLETE** | 2026-09-10 |
 | **PHASE 5.9.1** | Evidence + Provenance Architecture Review & Design Freeze | **COMPLETE** | 2026-09-10 |
-| **PHASE 5.10** | REST API Adapters & Engine Orchestration Service | **NOT STARTED** | — |
+| **PHASE 5.10** | REST API Adapters & Engine Orchestration Service | **COMPLETE** | 2026-09-10 |
 | **PHASE 5.11** | Comprehensive Phase 5 Test Suite & Performance Verification | **NOT STARTED** | — |
+
+## Phase 5.10 Completed Deliverables
+- [x] Implemented REST API Schemas (`backend/aivara/api/schemas/`):
+  - `datasets.py`: Format detection and sandboxed dataset ingestion request/response schemas.
+  - `dataset_integrity.py`: Strongly-typed request/response models for all 6 standalone detectors (Fingerprinting & Merkle proof, Near-Duplicates, Label Anomalies, Label Flipping, OOD & Image Quality, Contributor Aggregation).
+  - `scans.py`: Pipeline scan creation, cancellation, status read, progress event schemas.
+  - `evidence.py`: Evidence list/get, hash verification, finding backward-traceability graph, and provenance verification REST schemas.
+- [x] Implemented Scan Orchestration Service (`backend/aivara/services/orchestration_service.py`):
+  - **Thread-safe local scan task manager:** `ScanTaskManager` with thread-safe lock mechanisms and non-blocking in-memory pub-sub event streaming.
+  - **Multi-stage execution pipeline:** Coordinates Multi-Tier Fingerprinting $\to$ Near-Duplicate Analysis $\to$ Label Anomaly Analysis $\to$ Label Flipping Analysis $\to$ OOD/Image Quality Analysis $\to$ Contributor Aggregation $\to$ Evidence Synthesis & Provenance Sealing.
+  - **Deterministic selective detector execution:** Configurable detector execution masks (`detectors=["fingerprint", "duplicates", ...]`).
+  - **Cooperative Cancellation Semantics:** Real-time cancellation checkpoints between pipeline stages (`is_cancelled` flag).
+  - **SSE Progress Streaming:** Real-time Server-Sent Events (`/api/v1/scans/{scan_id}/events`) with keep-alive heartbeat comments.
+  - **Idempotency Recognition:** Automatically identifies matching execution identities and links existing provenance records (`IDEMPOTENT_HIT`).
+  - **Isolated Thread Database Sessions:** Worker threads bind clean sessions to avoid cross-thread SQLite transaction collisions.
+- [x] Implemented & Registered REST API Routers (`backend/aivara/api/routers/`):
+  - `dataset_integrity.py` [NEW]: Direct analytical detector endpoints (`/api/v1/dataset-integrity/...`).
+  - `scans.py` [NEW]: Scan orchestration, status polling, cancellation, and SSE streaming (`/api/v1/scans/...`).
+  - `datasets.py` [UPDATED]: Sandboxed format detection and dataset ingestion with automatic fingerprinting and sample registration.
+  - `evidence.py` [UPDATED]: Evidence and finding querying, SHA-256 integrity verification, backward traceability resolution, and cryptographic provenance verification.
+  - `errors.py` [UPDATED]: Deterministic HTTP exception mappings (400, 404, 409, 422).
+- [x] Comprehensive Integration Testing (`tests/test_phase5_api.py`):
+  - 21/21 integration tests passing covering all REST endpoints, orchestration stages, SSE streaming, multi-tenant isolation, error contracts, and cryptographic verification.
+  - 100% offline air-gapped execution, ZERO database schema changes, ZERO Phase 4 crypto modifications, ZERO Phase 5.9 frozen modifications.
+  - **Full test suite passes: 717 passed, 0 failed, 0 skipped.**
 
 ## Phase 5.9 Completed Deliverables
 - [x] Implemented Evidence + Provenance package (`backend/aivara/evidence/`):
