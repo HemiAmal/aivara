@@ -12,6 +12,7 @@ from aivara.services.audit_service import (
     AuditSequenceCollisionError,
 )
 from aivara.contributor_risk.service import ContributorRiskService
+from aivara.services.model_integrity_service import ModelIntegrityService
 
 __all__ = [
     "ProjectService",
@@ -19,6 +20,7 @@ __all__ = [
     "ContributorRiskService",
     "DatasetService",
     "AIModelService",
+    "ModelIntegrityService",
     "ProvenanceService",
     "AuditService",
     "AuditServiceError",
