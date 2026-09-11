@@ -16,12 +16,14 @@ from aivara.api.routers import (
     audit,
     reports,
     attack_lab,
+    contributor_risk,
 )
 
 api_v1_router = APIRouter(prefix="/api/v1")
 
 api_v1_router.include_router(projects.router)
 api_v1_router.include_router(contributors.router)
+api_v1_router.include_router(contributor_risk.router)
 api_v1_router.include_router(datasets.router)
 api_v1_router.include_router(dataset_integrity.router)
 api_v1_router.include_router(scans.router)

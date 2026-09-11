@@ -30,6 +30,10 @@ from aivara.evidence.exceptions import (
     StaleDatasetVersionError,
     VocabularyViolationError,
 )
+from aivara.contributor_risk.exceptions import (
+    CrossProjectContaminationError as ContributorCrossProjectError,
+    SemanticSafetyViolationError,
+)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -65,7 +69,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(CrossProjectContaminationError)
+    @app.exception_handler(ContributorCrossProjectError)
     @app.exception_handler(VocabularyViolationError)
+    @app.exception_handler(SemanticSafetyViolationError)
     @app.exception_handler(EvidenceValidationError)
     async def domain_validation_error_handler(request: Request, exc: Exception):
         msg = getattr(exc, "message", str(exc))

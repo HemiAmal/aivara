@@ -11,10 +11,12 @@ from aivara.services.audit_service import (
     AuditEventNotFoundError,
     AuditSequenceCollisionError,
 )
+from aivara.contributor_risk.service import ContributorRiskService
 
 __all__ = [
     "ProjectService",
     "ContributorService",
+    "ContributorRiskService",
     "DatasetService",
     "AIModelService",
     "ProvenanceService",
