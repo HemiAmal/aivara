@@ -1,5 +1,5 @@
-"""Centralized FastAPI error handling."""
-
+import math
+from typing import Any
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -34,6 +34,55 @@ from aivara.contributor_risk.exceptions import (
     CrossProjectContaminationError as ContributorCrossProjectError,
     SemanticSafetyViolationError,
 )
+from aivara.behavioral.exceptions import (
+    BehavioralError,
+    ExecutionProviderUnavailableError,
+    ExecutionTimeoutError,
+    InvalidInputTensorError,
+    InvalidOutputTensorError,
+    ModelExecutionError,
+    ModelLoadingError,
+    ResourceLimitExceededError,
+    SecuritySandboxViolationError,
+    UnsupportedExecutionFormatError,
+)
+from aivara.behavioral.provenance import (
+    BehavioralEvidenceIdentityError,
+    BehavioralEvidenceValidationError,
+    BehavioralExecutionIdentityError,
+    BehavioralProvenanceError,
+    CrossProjectBindingError,
+    EvidenceImmutableError,
+    EvidenceTamperedError,
+    IdempotencyConflictError,
+    NonFiniteValueError,
+    SignerUnavailableError,
+)
+from aivara.behavioral.anomaly import (
+    BehavioralAnomalyError,
+    CrossProjectAnalysisError,
+    IncompatibleAnalysisContextError,
+    InsufficientSupportError,
+    InvalidMetricDataError,
+)
+
+
+def _sanitize_error_details(obj: Any) -> Any:
+    if isinstance(obj, float):
+        if math.isnan(obj):
+            return "NaN"
+        if math.isinf(obj):
+            return "Infinity" if obj > 0 else "-Infinity"
+        return obj
+    elif isinstance(obj, (str, int, bool)) or obj is None:
+        return obj
+    elif isinstance(obj, dict):
+        return {str(k): _sanitize_error_details(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple, set)):
+        return [_sanitize_error_details(v) for v in obj]
+    elif isinstance(obj, Exception):
+        return str(obj)
+    return str(obj)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -45,6 +94,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ReplayDetectedError)
     @app.exception_handler(StaleDatasetVersionError)
     @app.exception_handler(ModelMismatchError)
+    @app.exception_handler(EvidenceImmutableError)
+    @app.exception_handler(IdempotencyConflictError)
     async def conflict_error_handler(request: Request, exc: Exception):
         msg = getattr(exc, "message", str(exc))
         code = getattr(exc, "code", "CONFLICT_ERROR")
@@ -70,9 +121,16 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(CrossProjectContaminationError)
     @app.exception_handler(ContributorCrossProjectError)
+    @app.exception_handler(CrossProjectBindingError)
+    @app.exception_handler(CrossProjectAnalysisError)
     @app.exception_handler(VocabularyViolationError)
     @app.exception_handler(SemanticSafetyViolationError)
     @app.exception_handler(EvidenceValidationError)
+    @app.exception_handler(BehavioralEvidenceValidationError)
+    @app.exception_handler(InsufficientSupportError)
+    @app.exception_handler(IncompatibleAnalysisContextError)
+    @app.exception_handler(InvalidMetricDataError)
+    @app.exception_handler(NonFiniteValueError)
     async def domain_validation_error_handler(request: Request, exc: Exception):
         msg = getattr(exc, "message", str(exc))
         code = getattr(exc, "code", "VALIDATION_ERROR")
@@ -85,12 +143,38 @@ def register_exception_handlers(app: FastAPI) -> None:
             ).model_dump(),
         )
 
+    @app.exception_handler(ExecutionProviderUnavailableError)
+    async def execution_provider_unavailable_handler(request: Request, exc: ExecutionProviderUnavailableError):
+        msg = getattr(exc, "message", str(exc))
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=ApiErrorResponse(
+                error=ErrorDetail(code="EXECUTION_PROVIDER_UNAVAILABLE", message=msg),
+                meta=ResponseMeta(),
+            ).model_dump(),
+        )
+
+    @app.exception_handler(ExecutionTimeoutError)
+    async def execution_timeout_handler(request: Request, exc: ExecutionTimeoutError):
+        msg = getattr(exc, "message", str(exc))
+        return JSONResponse(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            content=ApiErrorResponse(
+                error=ErrorDetail(code="EXECUTION_TIMEOUT", message=msg),
+                meta=ResponseMeta(),
+            ).model_dump(),
+        )
+
     @app.exception_handler(PathTraversalError)
     @app.exception_handler(SymlinkEscapeError)
     @app.exception_handler(DatasetIngestionError)
+    @app.exception_handler(SecuritySandboxViolationError)
+    @app.exception_handler(InvalidInputTensorError)
+    @app.exception_handler(InvalidOutputTensorError)
+    @app.exception_handler(UnsupportedExecutionFormatError)
     async def dataset_security_error_handler(request: Request, exc: Exception):
         msg = getattr(exc, "message", str(exc))
-        code = getattr(exc, "code", "DATASET_SECURITY_ERROR")
+        code = getattr(exc, "code", "SECURITY_OR_FORMAT_ERROR")
         details = getattr(exc, "details", None)
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -128,7 +212,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 error=ErrorDetail(
                     code="REQUEST_VALIDATION_ERROR",
                     message="The request payload failed validation.",
-                    details=exc.errors(),
+                    details=_sanitize_error_details(exc.errors()),
                 ),
                 meta=ResponseMeta(),
             ).model_dump(),

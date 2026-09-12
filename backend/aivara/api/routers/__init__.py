@@ -18,6 +18,7 @@ from aivara.api.routers import (
     attack_lab,
     contributor_risk,
     model_integrity,
+    behavioral,
 )
 
 api_v1_router = APIRouter(prefix="/api/v1")
@@ -30,6 +31,7 @@ api_v1_router.include_router(dataset_integrity.router)
 api_v1_router.include_router(scans.router)
 api_v1_router.include_router(models.router)
 api_v1_router.include_router(model_integrity.router)
+api_v1_router.include_router(behavioral.router)
 api_v1_router.include_router(inference.router)
 api_v1_router.include_router(findings.router)
 api_v1_router.include_router(evidence.router)
