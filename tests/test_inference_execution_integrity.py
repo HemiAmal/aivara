@@ -665,12 +665,11 @@ def test_category_af_caller_immutability(
 
 
 def test_category_aq_ar_as_at_au_phase_boundaries() -> None:
-    """Categories AQ through AU: Verify strict phase boundaries (no 10.9+ modules, no replay, no evidence persistence)."""
+    """Categories AQ through AU: Verify strict phase boundaries (no future unreleased modules, no blockchain)."""
     import sys
 
-    assert "aivara.inference.replay" not in sys.modules
-    assert "aivara.inference.evidence" not in sys.modules
     assert "aivara.inference.ledger" not in sys.modules
+
 
 
 

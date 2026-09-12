@@ -488,3 +488,178 @@ class InferenceRecordNotFoundError(InferenceRecordError):
         super().__init__(message=message, code="INFERENCE_RECORD_NOT_FOUND", details=details)
 
 
+# =====================================================================
+# Replay & Consistency Verification Exceptions (Phase 10.9)
+# =====================================================================
+
+
+class InferenceReplayError(InferenceError):
+    """Base exception for inference replay and consistency failures."""
+
+    def __init__(
+        self,
+        message: str,
+        code: str = "INFERENCE_REPLAY_ERROR",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message=message, code=code, details=details)
+
+
+class ReplayIneligibleError(InferenceReplayError):
+    """Raised when an inference record or transaction is not eligible for replay."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_INELIGIBLE", details=details)
+
+
+class ReplayRecordInvalidError(InferenceReplayError):
+    """Raised when the recorded inference record fails integrity verification."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_RECORD_INVALID", details=details)
+
+
+class ReplayBindingInvalidError(InferenceReplayError):
+    """Raised when the recorded Phase 10.7 binding fails verification."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_BINDING_INVALID", details=details)
+
+
+class ReplayProjectMismatchError(InferenceReplayError):
+    """Raised when replay execution crosses tenant isolation boundaries."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_PROJECT_MISMATCH", details=details)
+
+
+class ReplayInputMismatchError(InferenceReplayError):
+    """Raised when replay input data diverges from the recorded input identity."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_INPUT_MISMATCH", details=details)
+
+
+class ReplayModelMismatchError(InferenceReplayError):
+    """Raised when replay model weights or graph diverge from the recorded model identity."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_MODEL_MISMATCH", details=details)
+
+
+class ReplayEnvironmentMismatchError(InferenceReplayError):
+    """Raised when replay execution provider or device differs and policy prohibits it."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_ENVIRONMENT_MISMATCH", details=details)
+
+
+class ReplayStructuralDivergenceError(InferenceReplayError):
+    """Raised when replay output tensors diverge structurally (shape, rank, count, dtype)."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_STRUCTURAL_DIVERGENCE", details=details)
+
+
+class ReplayNumericalDivergenceError(InferenceReplayError):
+    """Raised when replay output tensor values diverge beyond declared numerical tolerances."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_NUMERICAL_DIVERGENCE", details=details)
+
+
+class ReplayNonReproducibleError(InferenceReplayError):
+    """Raised when replay execution cannot be reproduced under available conditions."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_NON_REPRODUCIBLE", details=details)
+
+
+class ReplayTimeoutError(InferenceReplayError):
+    """Raised when replay execution exceeds hard timeout limits."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_TIMEOUT", details=details)
+
+
+class ReplayVersionUnsupportedError(InferenceReplayError):
+    """Raised when replay policy or schema version is unsupported."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="REPLAY_VERSION_UNSUPPORTED", details=details)
+
+
+# =====================================================================
+# Phase 10.10: Evidence & Provenance Binding Exceptions
+# =====================================================================
+
+
+class InferenceEvidenceError(InferenceError):
+    """Base exception for all Phase 10.10 Evidence & Provenance Binding errors."""
+
+    def __init__(
+        self,
+        message: str,
+        code: str = "INFERENCE_EVIDENCE_ERROR",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message=message, code=code, details=details)
+
+
+class InferenceEvidenceValidationError(InferenceEvidenceError):
+    """Raised when inference evidence construction, schema, or content validation fails."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_EVIDENCE_VALIDATION_ERROR", details=details)
+
+
+class InferenceEvidenceTamperedError(InferenceEvidenceError):
+    """Raised when evidence hash does not match canonical recomputation or tamper is detected."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_EVIDENCE_TAMPERED", details=details)
+
+
+class InferenceEvidenceProjectMismatchError(InferenceEvidenceError):
+    """Raised when tenant project isolation boundary is violated in evidence verification."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_EVIDENCE_PROJECT_MISMATCH", details=details)
+
+
+class InferenceEvidenceHashMismatchError(InferenceEvidenceError):
+    """Raised when evidence cryptographic hash fails to match expected value."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_EVIDENCE_HASH_MISMATCH", details=details)
+
+
+class InferenceEvidenceBindingMismatchError(InferenceEvidenceError):
+    """Raised when underlying Phase 10.7 binding diverges from evidence representation."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_EVIDENCE_BINDING_MISMATCH", details=details)
+
+
+class InferenceEvidenceProvenanceMismatchError(InferenceEvidenceError):
+    """Raised when Phase 4 provenance record payload diverges from evidence identity."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_EVIDENCE_PROVENANCE_MISMATCH", details=details)
+
+
+class InferenceEvidenceUnavailableError(InferenceEvidenceError):
+    """Raised when required evidence or underlying provenance record is unavailable."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_EVIDENCE_UNAVAILABLE", details=details)
+
+
+class InferenceEvidenceUnverifiableError(InferenceEvidenceError):
+    """Raised when available evidence information is malformed or insufficient to verify."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_EVIDENCE_UNVERIFIABLE", details=details)
+
+
+

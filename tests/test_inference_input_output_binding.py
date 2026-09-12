@@ -943,10 +943,11 @@ def test_category_aw_no_evidence_provenance():
     assert not hasattr(cb, "create_composite_evidence")
 
 
-def test_category_ax_no_phase_10_9_implementation():
-    """Category AX: Phase 10.9 (Inference Replay & Consistency Verification) is NOT implemented."""
+def test_category_ax_no_phase_10_11_implementation():
+    """Category AX: Phase 10.11+ / future phases are NOT implemented."""
     with pytest.raises(ImportError):
-        import aivara.inference.replay  # type: ignore
+        import aivara.inference.ledger  # type: ignore
+
 
 
 # =====================================================================
