@@ -888,5 +888,31 @@ Findings AR-006, AR-007, AR-008, AR-009, AR-017, AR-020, AR-022, AR-023, AR-024,
 
 ---
 
+#### ADR-088: Paired Trigger Activation and Controlled Behavioral Comparison
+
+**Status:** ACCEPTED / IMPLEMENTED (Phase 9.4)
+
+**Context:**
+Evaluating whether a model exhibits trigger-like vulnerability requires comparing triggered executions against both clean baselines and empirical controls (`LOCATION_SHUFFLED` and `MAGNITUDE_MATCHED_NOISE`) on identical input samples across diverse model modalities (classification, detection, segmentation, and generic tensors).
+
+**Decision:**
+1. **Paired Correspondence:** All evaluations enforce strict 1-to-1 pairing ($\text{clean\_sample}_i \leftrightarrow \text{triggered\_sample}_i$).
+2. **Four Conditions:** Implement `CLEAN`, `ACTIVE_TRIGGER`, `LOCATION_SHUFFLED`, and `MAGNITUDE_MATCHED_NOISE` as standard evaluation conditions.
+3. **Deterministic PCG64 Randomness:** Derive all control condition seeds using RFC 8785 JCS + SHA-256 over canonical sample identity.
+4. **Task-Aware Activation Decision Rules:**
+   - **Detection Count Delta:** $\text{abs\_delta} = |n_{\text{cond}} - n_{\text{clean}}| \ge \text{count\_delta\_threshold} \ge 1$.
+   - **Detection IoU Drop:** $\Delta\text{IoU} = \text{clean\_iou} - \text{condition\_iou} \ge \text{iou\_drop\_threshold}$ (clean-relative degradation).
+   - **Segmentation Ground Truth mIoU Drop:** $\Delta\text{mIoU} = \text{clean\_miou} - \text{condition\_miou} \ge \theta_{\text{drop}}$.
+   - **Segmentation Reference Model Agreement Drop:** $\Delta A = A_{\text{clean, ref}} - A_{\text{condition, ref}} \ge \theta_{\text{drop}}$.
+   - **Segmentation Clean-vs-Condition Disagreement:** $D = 1.0 - \text{agreement}(\text{cond}, \text{clean}) \ge \theta_{\text{drop}}$ (preserved separate behavioral metric).
+5. **Realized RMS Matching:** Magnitude matched noise computes and matches the realized RMS delta ($\sqrt{\frac{1}{|S|}\sum (X_{\text{trig}} - X_{\text{clean}})^2}$) within declared tolerance ($\le 25\%$).
+6. **Geometry-Aware Location Shuffling:** Coordinates bounded by candidate dimensions and spatial slack across all candidate families.
+7. **Denominator & Target Safety:** TAR and TSR fail-safe to `None` if denominators are zero or target labels are absent.
+8. **Support Eligibility Separation:** Explicit `support_status` (`SUPPORT_ELIGIBLE` vs `INSUFFICIENT_SUPPORT`) separated from execution status (`COMPLETED`).
+9. **Zero Database Changes:** Zero database schema modifications or migrations.
+10. **No Maliciousness Inference:** Purely observational comparative layer; no inferences of malice or compromise.
+
+---
+
 *End of Architectural Decision Records*
 
