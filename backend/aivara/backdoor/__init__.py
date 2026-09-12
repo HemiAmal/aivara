@@ -4,9 +4,8 @@ Provides:
   - Safe, deterministic trigger candidate representation and generation (Phase 9.2)
   - Controlled clean vs triggered evaluation and transformation engine (Phase 9.3)
   - Empirical control comparison and statistical activation analysis (Phase 9.4)
-  - Bounded spatial grid localization (Phase 9.5)
-  - Cryptographic evidence synthesis and provenance ledger sealing (Phase 9.6)
-  - Project-scoped REST APIs, task orchestration, and SSE broadcasting (Phase 9.7)
+  - Bounded spatial grid localization and control significance (Phase 9.5)
+  - Downstream inference integrity and evidence synthesis (Phase 10)
 """
 
 from __future__ import annotations
@@ -165,4 +164,52 @@ __all__ = [
     "ActivationCriteriaError",
     "ModelIntegrityFailureError",
     "SourceInputIntegrityError",
+    # Statistics Enums, Engine & Models (Phase 9.5)
+    "HARD_INFERENCE_CEILING",
+    "InferenceBudgetAccounting",
+    "compute_budget_accounting",
+    "validate_budget_ceiling",
+    "clopper_pearson_confidence_interval",
+    "regularized_incomplete_beta",
+    "StatisticalAnalysisEngine",
+    "MultipleTestingMethodEnum",
+    "StagePromotionStatusEnum",
+    "StatisticalResultTaxonomyEnum",
+    "StatisticalSignificanceEnum",
+    "StatisticalStatusEnum",
+    "BudgetExceededError",
+    "CandidatePromotionError",
+    "InsufficientSupportError",
+    "MultiplicityAdjustmentError",
+    "PairingIntegrityError",
+    "StatisticalAnalysisError",
+    "StatisticalComputationError",
+    "compute_statistical_analysis_id",
+    "derive_pcg64_seed",
+    "GridCellStatisticalResult",
+    "SpatialLocalizationSummary",
+    "evaluate_spatial_grid_localization",
+    "CandidateStatisticalSummary",
+    "ConfidenceIntervalResult",
+    "PermutationTestResult",
+    "StatisticalAnalysisAssessment",
+    "benjamini_hochberg_fdr",
+    "holm_bonferroni_step_down",
+    "evaluate_paired_permutation_test",
+    "evaluate_result_taxonomy",
+    "CandidatePromotionAssessment",
+    "evaluate_stage2_promotion",
+    # Evidence & Provenance Binding (Phase 9.9)
+    "BackdoorEvidence",
+    "BackdoorEvidenceContent",
+    "BackdoorEvidenceType",
+    "BackdoorEvidenceLifecycleState",
+    "BackdoorProvenanceBindingService",
+    "create_backdoor_evidence",
+    "seal_backdoor_evidence",
+    "compute_backdoor_evidence_hash",
+    "compute_backdoor_execution_identity_hash",
+    "to_phase5_evidence_payload",
 ]
+
+

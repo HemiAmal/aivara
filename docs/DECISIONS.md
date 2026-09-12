@@ -914,5 +914,120 @@ Evaluating whether a model exhibits trigger-like vulnerability requires comparin
 
 ---
 
+#### ADR-089: Deterministic Paired Permutation Testing via Intersection-Union Principle
+
+**Status:** ACCEPTED / IMPLEMENTED (Phase 9.5)
+
+**Context:**
+Determining whether an observed target-conditioned success rate ($\text{TSR}$) under a synthetic trigger candidate $\tau$ represents a statistically significant effect requires evaluating the frozen hypothesis $H_0: \text{TSR}(\tau) \le \max(\text{TSR}(C_{\text{shuff}}), \text{TSR}(C_{\text{noise}}))$ without conflating descriptive aggregate control baselines with inferential null distributions.
+
+**Decision:**
+1. **Descriptive Control Baseline:** Define $\text{TSR}_{\text{control}} = \max(\text{TSR}(C_{\text{shuff}}), \text{TSR}(C_{\text{noise}}))$ and $\Delta_{\text{sep}} = \text{TSR}(\tau) - \text{TSR}_{\text{control}}$.
+2. **Intersection-Union Test (IUT):** Decompose $H_0$ into the union of sub-nulls $H_{0, \text{shuff}} \cup H_{0, \text{noise}}$. Evaluate synchronized paired permutation tests against both location-shuffled and magnitude-matched noise controls ($B = 1,000$, NumPy `PCG64` initialized from canonical identity seed), and compute composite empirical $p$-value $p = \max(p_{\text{shuffled}}, p_{\text{noise}})$.
+3. **Finite-Sample Corrected $p$-Value:** Calculate $p = \frac{1 + \text{exceedances}}{B + 1}$, guaranteeing valid probabilities in $[\frac{1}{B+1}, 1.0]$.
+4. **Preservation of Raw Rates:** Retain and report $\text{TSR}_{\text{trigger}}$, $\text{TSR}_{\text{shuffled}}$, $\text{TSR}_{\text{noise}}$, $\text{TSR}_{\text{control}}$, $\Delta_{\text{sep}}$, $T_{\text{obs, shuff}}$, $T_{\text{obs, noise}}$, $p_{\text{shuffled}}$, $p_{\text{noise}}$, and $p_{\text{composite}}$.
+5. **Support Gating:** Require $N \ge 10$ paired samples; return `INSUFFICIENT_SUPPORT` with $p = \text{None}$ when $N < 10$.
+6. **No Maliciousness Inference:** Statistical significance is strictly evidence of trigger-conditioned behavioral divergence, never proof of malicious intent or backdoor confirmation.
+
+---
+
+#### ADR-090: Exact Clopper-Pearson Confidence Intervals and Staged Multiplicity Control
+
+**Status:** ACCEPTED / IMPLEMENTED (Phase 9.5)
+
+**Context:**
+Evaluating candidate screening portfolios and fine-grained spatial localization grids requires controlling multiplicity while reporting exact binomial confidence intervals without external statistical library dependencies.
+
+**Decision:**
+1. **Exact Clopper-Pearson 95% Binomial CI:** Implement deterministic regularized incomplete beta quantile inversion via Lentz continued fraction expansion for exact binomial confidence intervals under the specified runtime environment.
+2. **Candidate Multiplicity Control:** Apply Benjamini-Hochberg False Discovery Rate (BH-FDR) at $\alpha = 0.05$ across candidate screening comparisons with deterministic tie-breaking.
+3. **Spatial Grid Multiplicity Control:** Apply Holm-Bonferroni step-down correction across $8 \times 8 = 64$ spatial grid cells to strictly control Family-Wise Error Rate (FWER) at $\alpha = 0.05$.
+4. **Stage 2 Candidate Promotion Gating:** Advance at most $K_2 \le 2$ candidates meeting $\text{TAR} \ge 0.50$, $\text{TSR} \ge 0.50$, $\Delta_{\text{sep}} > 0.20$, and $N \ge 10$, ranked deterministically by $(\Delta_{\text{sep}} \downarrow, \text{TSR} \downarrow, \text{TAR} \downarrow, \text{candidate\_hash} \uparrow)$.
+5. **Inference Budget Hard Ceiling:** Enforce a hard ceiling of 16,000 inferences across screening (2,450), expansion (1,400), and localization (6,400), failing closed if exceeded.
+6. **Zero Database Changes:** Zero database schema modifications or table alterations.
+7. **Downstream Integration:** Statistical assessments interface directly with downstream Phase 10 (Inference Integrity).
+
+---
+
+#### ADR-091: Backdoor Evidence and Cryptographic Provenance Binding Layer
+
+**Status:** ACCEPTED / IMPLEMENTED (Phase 9.9)
+
+**Context:**
+The Phase 9 analytical engine produces statistical and spatial assessments (`StatisticalAnalysisAssessment`, `CandidateStatisticalSummary`, `SpatialLocalizationSummary`) that must be bound into AIVARA's immutable, content-addressed evidence model and Phase 4 Ed25519 hash-linked cryptographic provenance chain without introducing schema migrations, new cryptography, or speculatively accusatory language.
+
+**Decision:**
+1. **Integration Adapter:** Implement `backend/aivara/backdoor/evidence.py` providing `create_backdoor_evidence`, `seal_backdoor_evidence`, and `BackdoorProvenanceBindingService` to bridge Phase 9 outputs into frozen Phase 4 / 5.9 subsystems.
+2. **Deterministic Evidence Identity:** Enforce content-addressed `evidence_id = SHA-256(RFC8785_JCS(BackdoorEvidenceContent))` over all semantic candidate results, control baselines, and statistical test outputs.
+3. **Deterministic Execution Identity:** Recompute execution identity over canonical project, model, sample set, detector, and policy parameters to guarantee idempotency.
+4. **Lifecycle Transition:** Restrict cryptographically bound state transitions strictly to `DRAFT -> SEALED`.
+5. **Zero Database Schema Changes:** Reuse existing `FindingModel`, `EvidenceModel`, and `ProvenanceRecordModel` entities via `EvidenceFindingBinder` and `ProvenanceBindingAdapter`.
+6. **Multi-Tenant Project Isolation:** Validate project identifiers strictly against database entities; reject any cross-project evidence binding with `CrossProjectContaminationError`.
+7. **Semantic Safety:** Strictly adhere to non-accusatory observational terminology (`trigger candidate`, `trigger-conditioned behavior`, `targeted output shift`); forbid speculative conclusions (`malicious`, `attacker_intent`, `backdoor_confirmed`).
+
+---
+
+#### ADR-092: Inference Transaction Identity & Content-Addressed Preprocessing/Postprocessing Contracts
+
+**Status:** ACCEPTED (Phase 10.1)
+
+**Context:**
+Verifying inference integrity requires capturing and validating the exact transformations applied before and after neural network execution. Allowing arbitrary Python preprocessing/postprocessing code introduces critical security vulnerabilities (code execution) and prevents deterministic content-addressed identity.
+
+**Decision:**
+1. **Declarative Recipe Model:** Define preprocessing and postprocessing configurations as strictly validated, declarative JSON recipes specifying deterministic operations (resize, normalize, channel transpose, threshold, NMS, argmax).
+2. **Prohibition of Dynamic Code Execution:** Strictly prohibit `eval`, `exec`, `pickle.loads`, or arbitrary lambda functions.
+3. **Content-Addressed Identities:** Derive `preprocessing_id` and `postprocessing_id` via RFC 8785 JCS + SHA-256 over canonical recipe representations.
+4. **Precondition Validation:** Enforce strict precondition checks (channels, resolution, dtype) and fail closed on contract violations without silent coercion.
+
+---
+
+#### ADR-093: Cryptographic Input-to-Output Binding for End-to-End Inference Verification
+
+**Status:** ACCEPTED (Phase 10.1)
+
+**Context:**
+Inference assurance requires proving that a specific output was genuinely produced by a specific input running on an authentic model artifact under declared preprocessing and execution conditions.
+
+**Decision:**
+1. **Composite Integrity Hash:** Compute an atomic composite integrity identity:
+   $$\text{IntegrityIdentity} = \text{SHA-256}(\text{RFC8785\_JCS}(\{ \text{input\_hash}, \text{model\_fingerprint}, \text{preprocessing\_id}, \text{execution\_id}, \text{raw\_output\_hash}, \text{postprocessing\_id}, \text{final\_output\_hash}, \text{project\_id} \}))$$
+2. **Separation of Raw and Final Output:** Hash and preserve both raw model logits/tensors and postprocessed structured predictions separately.
+3. **Zero Database Schema Changes:** Store composite identity and metadata within existing `InferenceRecordModel` and `output_json` fields.
+
+---
+
+#### ADR-094: Deterministic Replay vs. Reproduction Semantics & Non-Determinism Failure Modes
+
+**Status:** ACCEPTED (Phase 10.1)
+
+**Context:**
+Re-executing an inference transaction can produce slight floating-point divergences across different CPU architectures, BLAS implementations, or multithreading configurations. The system must distinguish valid deterministic verification from transaction replay attacks and handle non-deterministic execution gracefully.
+
+**Decision:**
+1. **Semantic Separation:** Distinguish valid deterministic re-execution (testing consistency) from unauthorized replay attacks (reusing old signatures on altered data).
+2. **Task-Aware Tolerance Policy:** Apply task-specific numerical comparison policies (e.g. $\|L_1 - L_2\|_\infty \le 10^{-5}$ for classification logits, $\text{mIoU} \ge 0.999$ for detection).
+3. **Explicit Uncertainty State:** Report `UNVERIFIABLE` rather than asserting false equality or false violation when runtime non-determinism prevents exact matching.
+
+---
+
+#### ADR-095: Task-Aware Output Schema and Numerical Integrity Verification Framework
+
+**Status:** ACCEPTED (Phase 10.1)
+
+**Context:**
+Models across classification, object detection, semantic segmentation, and embedding modalities produce different structured output tensors that may suffer from structural corruption, non-finite values (NaN/$\pm\infty$), or unnormalized probability distributions.
+
+**Decision:**
+1. **Specialized Schema Validators:** Implement task-specialized structural schema validators for Classification, Object Detection, Semantic Segmentation, and Feature Embeddings.
+2. **Mandatory Non-Finite Trapping:** Immediately fail closed with `OUTPUT_NONFINITE_VALUES` if any output tensor contains NaN, $+\infty$, or $-\infty$.
+3. **Probability Sanity:** Verify probability distributions sum to $1.0 \pm 10^{-4}$ when probability outputs are declared; never apply softmax automatically to logits unless specified in the postprocessing contract.
+4. **Geometric Sanity:** Reject inverted, degenerate, or negative-dimension bounding boxes.
+
+---
+
 *End of Architectural Decision Records*
+
+
+
 
