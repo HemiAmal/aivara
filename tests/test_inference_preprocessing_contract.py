@@ -666,10 +666,10 @@ def test_category_am_phase9_regression() -> None:
 
 
 def test_category_an_ao_ap_phase_boundaries() -> None:
-    """Categories AN, AO, AP: Verify no Phase 10.8+ implementations."""
+    """Categories AN, AO, AP: Verify no Phase 10.9+ implementations."""
     import sys
 
-    assert "aivara.inference.records" not in sys.modules
+    assert "aivara.inference.replay" not in sys.modules
     assert "aivara.inference.ledger" not in sys.modules
 
 

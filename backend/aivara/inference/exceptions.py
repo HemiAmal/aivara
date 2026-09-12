@@ -401,3 +401,90 @@ class InferenceBindingUnverifiableError(InferenceBindingError):
         super().__init__(message=message, code="INFERENCE_BINDING_UNVERIFIABLE", details=details)
 
 
+# =====================================================================
+# Inference Record Integrity Exceptions (Phase 10.8)
+# =====================================================================
+
+
+class InferenceRecordError(InferenceError):
+    """Base exception for inference record persistence and integrity failures."""
+
+    def __init__(
+        self,
+        message: str,
+        code: str = "INFERENCE_RECORD_ERROR",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message=message, code=code, details=details)
+
+
+class InferenceRecordInvalidError(InferenceRecordError):
+    """Raised when an inference record structure or content is invalid."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_RECORD_INVALID", details=details)
+
+
+class InferenceRecordTamperedError(InferenceRecordError):
+    """Raised when record data or integrity hash has been modified or corrupted."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_RECORD_TAMPERED", details=details)
+
+
+class InferenceRecordProjectMismatchError(InferenceRecordError):
+    """Raised when record access or creation crosses tenant isolation boundaries."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_RECORD_PROJECT_MISMATCH", details=details)
+
+
+class InferenceRecordBindingInvalidError(InferenceRecordError):
+    """Raised when the underlying Phase 10.7 binding is invalid, unverified, or mismatched."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_RECORD_BINDING_INVALID", details=details)
+
+
+class InferenceRecordBindingUnavailableError(InferenceRecordError):
+    """Raised when the underlying Phase 10.7 binding cannot be found or loaded."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_RECORD_BINDING_UNAVAILABLE", details=details)
+
+
+class InferenceRecordHashMismatchError(InferenceRecordError):
+    """Raised when computed record integrity hash deviates from recorded integrity hash."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_RECORD_HASH_MISMATCH", details=details)
+
+
+class InferenceRecordVersionUnsupportedError(InferenceRecordError):
+    """Raised when record version or schema version is unsupported."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_RECORD_VERSION_UNSUPPORTED", details=details)
+
+
+class InferenceRecordImmutableFieldModifiedError(InferenceRecordError):
+    """Raised when an attempt is made to mutate an immutable inference record field."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_RECORD_IMMUTABLE_FIELD_MODIFIED", details=details)
+
+
+class InferenceRecordPersistenceError(InferenceRecordError):
+    """Raised when persistent storage or read-back verification fails."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_RECORD_PERSISTENCE_FAILURE", details=details)
+
+
+class InferenceRecordNotFoundError(InferenceRecordError):
+    """Raised when the requested inference record does not exist."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message=message, code="INFERENCE_RECORD_NOT_FOUND", details=details)
+
+

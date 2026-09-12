@@ -13,6 +13,7 @@ from aivara.services.audit_service import (
 )
 from aivara.contributor_risk.service import ContributorRiskService
 from aivara.services.model_integrity_service import ModelIntegrityService
+from aivara.inference.records import InferenceRecordService
 
 __all__ = [
     "ProjectService",
@@ -26,4 +27,5 @@ __all__ = [
     "AuditServiceError",
     "AuditEventNotFoundError",
     "AuditSequenceCollisionError",
+    "InferenceRecordService",
 ]
