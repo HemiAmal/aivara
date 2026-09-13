@@ -1,5 +1,17 @@
-"""API Request & Response Schemas package."""
-
+from aivara.api.schemas.drift import (
+    DriftAnalysisCreateRequest,
+    DriftAnalysisResultResponse,
+    DriftAnalysisTypeEnum,
+    DriftCapabilitiesResponse,
+    DriftFeatureSummaryItem,
+    DriftProgressEvent,
+    DriftTaskResponse,
+    DriftTaskStatusEnum,
+    MultiModalAssuranceConfig,
+    RepresentationAnalysisConfig,
+    SourceAnalysisConfig,
+    TemporalAnalysisConfig,
+)
 from aivara.api.schemas.inference import (
     FindingSummaryItem,
     InferenceProgressEvent,
@@ -14,6 +26,18 @@ from aivara.api.schemas.inference import (
 )
 
 __all__ = [
+    "DriftAnalysisCreateRequest",
+    "DriftAnalysisResultResponse",
+    "DriftAnalysisTypeEnum",
+    "DriftCapabilitiesResponse",
+    "DriftFeatureSummaryItem",
+    "DriftProgressEvent",
+    "DriftTaskResponse",
+    "DriftTaskStatusEnum",
+    "MultiModalAssuranceConfig",
+    "RepresentationAnalysisConfig",
+    "SourceAnalysisConfig",
+    "TemporalAnalysisConfig",
     "InferenceTaskStageEnum",
     "InferenceVerificationRequest",
     "InferenceVerificationResponse",
@@ -25,3 +49,4 @@ __all__ = [
     "InferenceProgressEvent",
     "FindingSummaryItem",
 ]
+

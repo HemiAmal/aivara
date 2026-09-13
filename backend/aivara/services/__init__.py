@@ -16,6 +16,7 @@ from aivara.services.model_integrity_service import ModelIntegrityService
 from aivara.inference.records import InferenceRecordService
 from aivara.inference.replay import InferenceReplayService
 from aivara.services.inference_service import InferenceService, InferenceTaskManager, InferenceTask
+from aivara.services.drift_service import DriftService, DriftTaskManager, DriftTask
 
 __all__ = [
     "ProjectService",
@@ -34,4 +35,8 @@ __all__ = [
     "InferenceService",
     "InferenceTaskManager",
     "InferenceTask",
+    "DriftService",
+    "DriftTaskManager",
+    "DriftTask",
 ]
+

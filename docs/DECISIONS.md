@@ -1156,9 +1156,47 @@ AIVARA generates heterogeneous verification, integrity, behavioral, and distribu
 9. **Resource Ceilings & Performance Boundedness:** Enforce hard bounds: $E \le 1000$ evidence items and $F \le 200$ findings per run, guaranteeing linear $O(E)$ time execution and $<100\text{MB}$ memory overhead.
 10. **Zero Database Schema Changes:** Store all synthesized profiles and risk assessments in existing SQLite tables with 0 new migrations.
 
+#### ADR-103: API and Task Orchestration Architecture for Distribution Shift Subsystem
+
+**Status:** PERMANENTLY FROZEN (Phase 11.10)
+
+**Context:**
+AIVARA has permanently frozen analytical engines across 8 distribution shift dimensions (Phases 11.2–11.9: Population Boundary, Statistical Engine, Feature Drift, Image Drift, Representation Drift, Temporal Drift, Source Drift, and Multi-Modal Risk Integration). An authoritative, asynchronous API orchestration and task execution layer is required to safely expose these capabilities over HTTP REST and Server-Sent Events (SSE) without introducing duplicate statistical math, violating project isolation, causing event loop starvation, or eroding non-attribution semantic invariants.
+
+**Decision:**
+1. **API as Orchestration Boundary:** The API and task infrastructure (`/api/v1/projects/{project_id}/drift/...`) serves strictly as an orchestration, dispatch, and formatting layer. Zero independent statistical, risk, p-value, or proof calculations are permitted within the API layer.
+2. **Asynchronous Task Architecture:** Adopt the asynchronous job pattern: `POST .../analyses` validates input, computes a deterministic `request_fingerprint`, registers an in-memory `DriftTask`, and returns `202 Accepted` with `task_id` and initial status `QUEUED`.
+3. **In-Process Thread Pool Concurrency:** Offload CPU-bound analytical execution to a dedicated `ThreadPoolExecutor(max_workers=4)` to protect FastAPI async event loop responsiveness.
+4. **Deterministic State Machine & Cooperative Cancellation:** Implement an atomic 6-state lifecycle (`QUEUED`, `RUNNING`, `CANCEL_REQUESTED`, `CANCELLED`, `COMPLETED`, `FAILED`). Analytical engines check cooperative cancellation sentinels at feature/window/group loop boundaries and cleanly halt without database corruption.
+5. **Idempotency via Request Fingerprinting:** Bind idempotency keys to RFC 8785 JCS + SHA-256 `request_fingerprint` digests. Identical requests return existing tasks; conflicting payloads under the same key raise `409 Conflict` (`IDEMPOTENCY_CONFLICT`).
+6. **Resilient SSE Streaming with Sequence Numbering:** Broadcast real-time progress events formatted with monotonic integer `sequence_number`, stage descriptors, and keepalive pings. Buffer 50 events in-memory to support seamless reconnect replay via `Last-Event-ID`.
+7. **Strict Object-Level Authorization (BOLA):** Enforce strict `project_id` scoping at the router level. Mismatched or cross-tenant task/dataset queries return generic `404 Not Found` without disclosing resource existence.
+8. **Consistent Enveloping & Sanitized Errors:** Return all successful responses in `ApiResponse[T]` and error responses in `ApiErrorResponse`, strictly suppressing internal stack traces, filesystem paths, and SQLite details.
+9. **Semantic Non-Attribution Invariant:** API responses strictly preserve $\text{Detection} \ne \text{Proof} \ne \text{Malicious Intent}$. Response models use descriptive terminology (`drift_impact_level`, `normalized_operational_exposure_index`) and prohibit accusations of contributor guilt or uncalibrated attack probabilities.
+10. **Zero Database Migrations & Air-Gap Compliance:** Persist drift findings, evidence, risk assessments, and provenance records exclusively into existing SQLite tables with 0 schema migrations, 0 new dependencies, and 100% offline execution.
+
+---
+
+#### ADR-104: Comprehensive Distribution Shift Verification Architecture Baseline
+
+**Status:** PROPOSED / ARCHITECTURE FROZEN (Phase 11.11)
+
+**Context:**
+The Phase 11 Distribution Shift subsystem encompasses 8 analytical and integration phases (Phases 11.2–11.10) with 2,102 baseline passing tests. A rigorous, master verification architecture and test plan is required to comprehensively validate all mathematical, cryptographic, security, API orchestration, and non-regression invariants across the entire integrated pipeline without modifying frozen production code, introducing duplicate statistical math, or adding new dependencies.
+
+**Decision:**
+1. **12-Layer Verification Partitioning:** Design and execute verification across 12 orthogonal layers: (1) Unit Correctness, (2) Component Integration, (3) Cross-Component Consistency, (4) End-to-End Assurance, (5) API & Task Integration, (6) Security & BOLA Authorization, (7) Determinism & Repeatability, (8) Resource Governance & Complexity, (9) Cryptographic Integrity, (10) 100% Offline Air-Gap Compliance, (11) Non-Regression Guarantee, and (12) Adversarial Mutation Resistance.
+2. **Formal Verification Requirements:** Enforce 85 traceable verification requirements (`REQ-11-VERIF-001` through `REQ-11-VERIF-085`) mapping every frozen architectural specification to concrete pass/fail criteria.
+3. **Cross-Phase Adversarial Threat Model:** Explicitly mitigate and test 15 cross-phase threat vectors spanning reference poisoning, stealth drift, label flipping, decompression bombs, model tampering, timestamp manipulation, source spoofing, p-hacking, evidence duplication, and BOLA bypass.
+4. **Adversarial & Invariant Mutation Matrix:** Standardize 20 systematic mutation test cases (`MUT-001` through `MUT-020`) verifying deterministic hash avalanche sensitivity on semantic changes and exact byte invariance on non-semantic permutations (key ordering, timestamp arrival ordering, contributor formatting).
+5. **Zero Production Changes Invariant:** The verification architecture strictly mandates 0 modifications to frozen backend engines (`backend/aivara/drift/`, `backend/aivara/assurance/`), 0 database schema changes, 0 migrations, and 0 new dependencies.
+6. **Air-Gap Strictness:** Require 100% offline execution with zero outbound network calls, zero DNS lookups, zero cloud telemetry, and zero unauthenticated model downloads.
+
 ---
 
 *End of Architectural Decision Records*
+
+
 
 
 

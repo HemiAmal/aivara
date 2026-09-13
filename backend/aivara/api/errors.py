@@ -65,6 +65,7 @@ from aivara.behavioral.anomaly import (
     InsufficientSupportError,
     InvalidMetricDataError,
 )
+from aivara.drift.exceptions import DriftConflictError
 
 
 def _sanitize_error_details(obj: Any) -> Any:
@@ -96,7 +97,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ModelMismatchError)
     @app.exception_handler(EvidenceImmutableError)
     @app.exception_handler(IdempotencyConflictError)
+    @app.exception_handler(DriftConflictError)
     async def conflict_error_handler(request: Request, exc: Exception):
+
         msg = getattr(exc, "message", str(exc))
         code = getattr(exc, "code", "CONFLICT_ERROR")
         details = getattr(exc, "details", None)

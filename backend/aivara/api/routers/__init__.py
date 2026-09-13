@@ -20,6 +20,7 @@ from aivara.api.routers import (
     model_integrity,
     behavioral,
     backdoor,
+    drift,
 )
 
 api_v1_router = APIRouter(prefix="/api/v1")
@@ -42,3 +43,5 @@ api_v1_router.include_router(provenance.router)
 api_v1_router.include_router(audit.router)
 api_v1_router.include_router(reports.router)
 api_v1_router.include_router(attack_lab.router)
+api_v1_router.include_router(drift.router)
+

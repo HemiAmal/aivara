@@ -63,3 +63,25 @@ class InvalidPopulationError(DistributionBoundaryError):
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__(message, code="INVALID_POPULATION", details=details)
+
+
+class DriftConflictError(DistributionBoundaryError):
+    """Raised on state machine or resource conflicts during drift analysis."""
+    def __init__(
+        self,
+        message: str,
+        code: str = "DRIFT_CONFLICT",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message, code=code, details=details)
+
+
+class IdempotencyConflictError(DriftConflictError):
+    """Raised when an idempotency key is reused with differing request parameters."""
+    def __init__(
+        self,
+        message: str = "Idempotency key previously submitted with differing request parameters.",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message, code="IDEMPOTENCY_CONFLICT", details=details)
+
