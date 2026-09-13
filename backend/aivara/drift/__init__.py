@@ -1,0 +1,189 @@
+"""AIVARA Phase 11 — Distribution Shift / Data Drift Analysis Subsystem.
+
+Phase 11.2 establishes the authoritative Reference ↔ Target Distribution Boundary.
+Phase 11.3 implements the authoritative Statistical Distribution Shift Engine.
+Phase 11.4 implements Feature & Dataset Drift Analysis.
+"""
+
+from aivara.drift.boundary import ComparisonBoundaryEngine
+from aivara.drift.compatibility import (
+    compute_feature_descriptor_hash,
+    compute_label_descriptor_hash,
+    compute_representation_descriptor_hash,
+    validate_feature_compatibility,
+    validate_image_compatibility,
+    validate_label_compatibility,
+    validate_representation_compatibility,
+)
+from aivara.drift.engine import (
+    StatisticalDriftEngine,
+    compute_analysis_result_hash,
+)
+from aivara.drift.enums import (
+    BoundaryEvaluationStatus,
+    CompatibilityStatus,
+    DataModality,
+    DriftImpactLevel,
+    FeatureDriftCategory,
+    FeatureType,
+    MultipleTestingCorrectionMethod,
+    PopulationType,
+    SamplingMethod,
+    ShiftDecisionState,
+    StatisticalMethod,
+)
+from aivara.drift.exceptions import (
+    DistributionBoundaryError,
+    IncompatiblePopulationError,
+    InsufficientDataError,
+    InvalidPopulationError,
+    ProjectMismatchError,
+    ResourceLimitExceededError,
+)
+from aivara.drift.feature_dataset_engine import (
+    FeatureDatasetDriftAnalyzer,
+    compute_dataset_drift_profile_hash,
+)
+from aivara.drift.image_descriptors import (
+    MAX_IMAGE_BYTES,
+    MAX_IMAGE_DIMENSION,
+    MAX_IMAGE_PIXELS,
+    MAX_POPULATION_IMAGES,
+    extract_population_descriptors,
+    extract_single_image_descriptors,
+)
+from aivara.drift.image_engine import (
+    ImageDistributionShiftAnalyzer,
+    compute_image_drift_profile_hash,
+)
+from aivara.drift.multiple_testing import (
+    apply_benjamini_hochberg,
+    apply_holm_bonferroni,
+    apply_multiple_testing_correction,
+)
+from aivara.drift.population import (
+    compute_population_selection_hash,
+    compute_sample_ids_hash,
+    deterministic_subsample,
+    filter_sample_records,
+    resolve_population_identity,
+)
+from aivara.drift.schemas import (
+    CategoricalDriftResult,
+    ComparisonBoundaryResult,
+    ComparisonContract,
+    DatasetDriftProfile,
+    FeatureDriftProfile,
+    FeatureDriftResult,
+    FeatureSchemaDescriptor,
+    ImageDriftProfile,
+    ImagePopulationAccounting,
+    ImageSchemaDescriptor,
+    LabelDriftProfile,
+    LabelSchemaDescriptor,
+    MultivariateDriftResult,
+    PopulationIdentity,
+    PopulationSelector,
+    RepresentationDescriptor,
+    SamplingConfig,
+    StatisticalAnalysisConfig,
+    StatisticalAnalysisResult,
+)
+from aivara.drift.stats_categorical import (
+    chi2_survival_function,
+    compute_chi_square_test,
+    compute_jensen_shannon_divergence,
+    compute_total_variation_distance,
+)
+from aivara.drift.stats_continuous import (
+    compute_psi,
+    compute_two_sample_ks,
+    compute_wasserstein_1d,
+    sanitize_1d_array,
+)
+from aivara.drift.stats_multivariate import (
+    compute_energy_distance,
+    compute_kernel_mmd,
+    compute_permutation_p_value,
+    sanitize_2d_array,
+)
+
+__all__ = [
+    "BoundaryEvaluationStatus",
+    "CategoricalDriftResult",
+    "CompatibilityStatus",
+    "ComparisonBoundaryEngine",
+    "ComparisonBoundaryResult",
+    "ComparisonContract",
+    "DataModality",
+    "DatasetDriftProfile",
+    "DistributionBoundaryError",
+    "DriftImpactLevel",
+    "FeatureDatasetDriftAnalyzer",
+    "FeatureDriftCategory",
+    "FeatureDriftProfile",
+    "FeatureDriftResult",
+    "FeatureSchemaDescriptor",
+    "FeatureType",
+    "ImageDistributionShiftAnalyzer",
+    "ImageDriftProfile",
+    "ImagePopulationAccounting",
+    "ImageSchemaDescriptor",
+    "IncompatiblePopulationError",
+    "InsufficientDataError",
+    "InvalidPopulationError",
+    "LabelDriftProfile",
+    "LabelSchemaDescriptor",
+    "MAX_IMAGE_BYTES",
+    "MAX_IMAGE_DIMENSION",
+    "MAX_IMAGE_PIXELS",
+    "MAX_POPULATION_IMAGES",
+    "MultipleTestingCorrectionMethod",
+    "MultivariateDriftResult",
+    "PopulationIdentity",
+    "PopulationSelector",
+    "PopulationType",
+    "ProjectMismatchError",
+    "RepresentationDescriptor",
+    "ResourceLimitExceededError",
+    "SamplingConfig",
+    "SamplingMethod",
+    "ShiftDecisionState",
+    "StatisticalAnalysisConfig",
+    "StatisticalAnalysisResult",
+    "StatisticalDriftEngine",
+    "StatisticalMethod",
+    "apply_benjamini_hochberg",
+    "apply_holm_bonferroni",
+    "apply_multiple_testing_correction",
+    "chi2_survival_function",
+    "compute_analysis_result_hash",
+    "compute_chi_square_test",
+    "compute_dataset_drift_profile_hash",
+    "compute_energy_distance",
+    "compute_feature_descriptor_hash",
+    "compute_image_drift_profile_hash",
+    "compute_jensen_shannon_divergence",
+    "compute_kernel_mmd",
+    "compute_label_descriptor_hash",
+    "compute_permutation_p_value",
+    "compute_population_selection_hash",
+    "compute_psi",
+    "compute_representation_descriptor_hash",
+    "compute_sample_ids_hash",
+    "compute_total_variation_distance",
+    "compute_two_sample_ks",
+    "compute_wasserstein_1d",
+    "deterministic_subsample",
+    "extract_population_descriptors",
+    "extract_single_image_descriptors",
+    "filter_sample_records",
+    "resolve_population_identity",
+    "sanitize_1d_array",
+    "sanitize_2d_array",
+    "validate_feature_compatibility",
+    "validate_image_compatibility",
+    "validate_label_compatibility",
+    "validate_representation_compatibility",
+]
+

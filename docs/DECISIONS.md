@@ -1078,6 +1078,24 @@ AIVARA Phase 10 implements an 18-checkpoint inference assurance pipeline spannin
 
 ---
 
+#### ADR-099: Distribution Shift and Dataset Drift Analysis Architecture
+
+**Status:** ACCEPTED (Phase 11.1)
+
+**Context:**
+Production computer vision and multi-contributor data curation pipelines frequently experience changes in lighting, environmental context, sensor hardware, class proportions, and contributor demographics. Unmonitored distribution shift invalidates baseline safety profiles and degrades downstream model reliability. An automated, mathematically rigorous, offline assurance framework is required to quantify population divergence between trusted reference baselines and target datasets without confusing statistical drift with malicious intent or introducing duplicate domain models and database tables.
+
+**Decision:**
+1. **Detection Layer Classification (ADR-028):** Classify all distribution shift evaluations strictly as analytical Detection Layer observations ($\text{evidence\_layer} = \text{detection}$), yielding calibrated statistical confidence $\in [0.0, 1.0]$. Proof-layer confidence ($1.0$) is reserved for cryptographic/deterministic invariants.
+2. **Dual-Gate Decision Policy (Significance & Effect Size):** Couple formal two-sample hypothesis tests (Two-Sample KS, Chi-Square, Permutation MMD, Energy Distance) with physical effect sizes (1D Wasserstein Distance $W_1$, Population Stability Index PSI, Total Variation Distance TVD, Jensen–Shannon Divergence JSD). Prevent false positive alerts on large datasets by requiring both statistical significance ($p < \alpha_{\text{corrected}}$) and practical effect size thresholds ($\text{PSI} \ge 0.10$, $\text{TVD} \ge 0.05$) to declare material shift.
+3. **Multiple Hypothesis Testing Correction:** Enforce Benjamini–Hochberg False Discovery Rate (FDR) control at $q^* = 0.05$ across multi-feature test suites, with Holm–Bonferroni step-down Family-Wise Error Rate (FWER) control for global dataset-level alerts.
+4. **Explicit, Immutable Reference Model:** Mandate explicit identification of baseline datasets/versions (`reference_dataset_version_id`) anchored by cryptographic content hashes (`dataset_hash`). Prohibit arbitrary or dynamic baseline selection.
+5. **Sample Size Floor & Deterministic Subsampling:** Enforce a strict minimum sample size floor ($N_{\text{min}} = 30$) below which the system transitions fail-closed to `INSUFFICIENT_DATA`. Deterministically subsample datasets exceeding $N_{\text{max}} = 5,000$ using PRNG seeds derived from dataset identity digests to guarantee $O(1)$ upper-bounded computational overhead.
+6. **Non-Attribution Principle:** Restrict distribution shift findings strictly to descriptive statistical divergences (`PRACTICAL_COVARIATE_SHIFT_DETECTED`, `LABEL_PROPORTION_SHIFT_DETECTED`). Prohibit automated accusations of malicious intent, poisoning, or contributor misconduct based solely on statistical drift.
+7. **Zero Database Schema Changes:** Persist all analysis results, statistical payloads, and test diagnostics within existing tables (`findings`, `evidence`, `provenance_records`, `audit_events`, `dataset_versions`) using structured JSON columns (`data_json`, `metadata_json`).
+
+---
+
 *End of Architectural Decision Records*
 
 
