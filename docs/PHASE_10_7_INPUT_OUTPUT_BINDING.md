@@ -1,39 +1,117 @@
 # Phase 10.7 — Input → Output Binding Specification
 
-## 1. Overview & Purpose
-Phase 10.7 establishes an authoritative, deterministic cryptographic binding subsystem (`backend/aivara/inference/composite_binding/`) that binds the complete inference transaction from validated input (Phase 10.2) through verified model (Phase 7 / Phase 10.3), preprocessing contract & transformed input (Phase 10.4), controlled execution & raw output (Phase 10.5), to validated output (Phase 10.6).
+## 1. Overview & Architectural Role
 
-The binding computes the canonical `inference_binding_hash` (ADR-093) ensuring end-to-end cryptographic traceability and tamper-evidence.
+Phase 10.7 establishes the authoritative, deterministic cryptographic binding connecting every artifact, contract, configuration, and result produced across the AIVARA Phase 10 inference verification pipeline.
+
+```
++---------------------------------------------------------------------------------------------------+
+|                                  PHASE 10.7 INFERENCE BINDING PIPELINE                            |
++---------------------------------------------------------------------------------------------------+
+| Phase 10.2: Validated Input (raw_hash, canonical_hash, input_id)                                  |
+| Phase 7 / 10.3: Model (model_id, structural_hash, artifact_hash, contract_hash, master_fp)        |
+| Phase 10.4: Preprocessing Contract & Transformed Input (contract_hash, transformed_canonical_hash)|
+| Phase 10.5: Execution Identity & Raw Output (execution_hash, raw_output_hash)                      |
+| Phase 10.6: Output Contract & Validated Output (output_contract_hash, validated_output_identity)  |
++---------------------------------------------------------------------------------------------------+
+                                                  │
+                                                  ▼
+             [Canonical JCS Serialized Descriptor (16 committed fields)]
+                                                  │
+                                                  ▼
+                          SHA-256(canonical_json_bytes)
+                                                  │
+                                                  ▼
+                              `inference_binding_hash` (ADR-093)
+```
+
+Phase 10.7 guarantees:
+- **No Phase Skip:** An inference cannot be bound without validated output from Phase 10.6, execution from Phase 10.5, preprocessing from Phase 10.4, model identity from Phase 10.3, and input identity from Phase 10.2.
+- **Cross-Component Consistency:** Project ID, Input ID, Model ID, and Raw Output Hash consistency are strictly enforced across component boundaries.
+- **Cryptographic Tamper-Evidence:** Altering any single bit across any of the 16 committed fields produces an entirely different `inference_binding_hash`.
 
 ---
 
-## 2. Architecture & 16 Canonical Descriptor Fields
-The canonical descriptor commits to exactly 16 atomic fields formatted per RFC-8785 (JCS) and hashed with SHA-256:
+## 2. Canonical Descriptor Specification
 
-1. `binding_version`: Schema version string (default: `"1.0"`).
-2. `execution_identity_hash`: SHA-256 hash representing Phase 10.5 execution container/environment.
-3. `input_canonical_hash`: SHA-256 canonical hash of input payload (Phase 10.2).
-4. `input_id`: UUID of the input transaction.
-5. `input_model_binding_hash`: SHA-256 input-to-model binding hash (Phase 10.3).
-6. `input_raw_hash`: SHA-256 raw hash of input payload.
-7. `model_artifact_hash`: SHA-256 artifact hash of the model (Phase 7).
-8. `model_contract_hash`: SHA-256 model contract definition hash.
-9. `model_id`: UUID of the model entity.
-10. `model_master_fingerprint`: SHA-256 master fingerprint of the model (Phase 7).
-11. `model_structural_hash`: SHA-256 structural architecture hash.
-12. `output_contract_hash`: SHA-256 output schema contract hash (Phase 10.6).
-13. `preprocessing_contract_hash`: SHA-256 preprocessing contract hash (Phase 10.4).
-14. `project_id`: UUID of the tenancy project.
-15. `raw_output_hash`: SHA-256 raw output tensor hash (Phase 10.5).
-16. `schema_version`: String schema version identifier (default: `"1.0"`).
-17. `transformed_input_hash`: SHA-256 transformed tensor payload hash (Phase 10.4).
-18. `validated_output_identity`: Canonical dictionary identity of validated output tensors (Phase 10.6).
+The canonical descriptor is a RFC 8785 (JCS) JSON dictionary with sorted keys and no extraneous whitespace:
+
+| Field Key | Type | Description | Origin Subsystem |
+|:---|:---|:---|:---|
+| `binding_version` | `str` | Fixed schema version (`"1.0.0"`) | Phase 10.7 |
+| `execution_identity_hash` | `str` | SHA-256 of execution identity | Phase 10.5 |
+| `input_canonical_hash` | `str` | SHA-256 of canonical input payload | Phase 10.2 |
+| `input_id` | `str` | Unique Input UUID | Phase 10.2 |
+| `input_model_binding_hash`| `str` | SHA-256 of Input-Model Binding | Phase 10.3 |
+| `input_raw_hash` | `str` | SHA-256 of raw unnormalized input bytes | Phase 10.2 |
+| `model_artifact_hash` | `str` | SHA-256 of ONNX model artifact | Phase 7 / 10.3 |
+| `model_contract_hash` | `str` | SHA-256 of Model Input Contract | Phase 10.3 |
+| `model_id` | `str` | Unique Model UUID | Phase 7 / 10.3 |
+| `model_master_fingerprint`| `str` | Master fingerprint hex | Phase 7 / 10.3 |
+| `model_structural_hash` | `str` | SHA-256 of model graph topology | Phase 7 / 10.3 |
+| `output_contract_hash` | `str` | SHA-256 of Output Contract | Phase 10.6 |
+| `preprocessing_contract_hash` | `str` | SHA-256 of Preprocessing Contract | Phase 10.4 |
+| `project_id` | `str` | Unique Project UUID | Common Context |
+| `raw_output_hash` | `str` | SHA-256 of Raw Output Envelope | Phase 10.5 |
+| `schema_version` | `str` | Fixed schema version (`"1.0.0"`) | Phase 10.7 |
+| `transformed_input_hash` | `str` | SHA-256 of Transformed Input Identity | Phase 10.4 |
+| `validated_output_identity`| `dict` | Canonical Validated Output Identity Descriptor | Phase 10.6 |
 
 ---
 
-## 3. Core Cryptographic Invariants
-- **Deterministic Canonicalization**: Serialized exclusively with RFC-8785 JSON Canonicalization Scheme (JCS).
-- **Zero Evaluation / Pure Observational Binding**: Cryptographic computation only; zero model inference or state mutation.
-- **Fail-Closed Verification**: Any hash mismatch, project mismatch, or missing component immediately returns `InferenceBindingStatus.INVALID` or raises appropriate domain exception.
-- **Tenancy Isolation**: Strict validation that all components share the identical `project_id`.
-- **Database Schema Changes**: 0 (zero migrations, zero table alters).
+## 3. Verification Subsystem
+
+Verification (`verify_inference_binding`) reconstructs the canonical descriptor from components or an existing binding, recomputes the SHA-256 hash using JCS, and performs comprehensive cross-validation:
+
+1. Recomputed hash match (`INFERENCE_BINDING_HASH_MISMATCH`).
+2. Project ID consistency (`INFERENCE_BINDING_PROJECT_MISMATCH`).
+3. Cross-component consistency (`INFERENCE_BINDING_COMPONENT_MISMATCH`):
+   - Input ID across InputIdentity, InputModelBinding, TransformedInputIdentity.
+   - Model ID across ModelIdentity, InputModelBinding, ExecutionIdentity.
+   - Raw output hash across ExecutionResult and ValidatedOutput.
+4. Completeness checks (`INFERENCE_BINDING_*_MISSING`).
+5. SHA-256 hex format validation (lowercase, 64 hex characters).
+
+---
+
+## 4. API Reference
+
+```python
+from aivara.inference.composite_binding import (
+    InferenceBinding,
+    InferenceBindingStatus,
+    InferenceBindingVerificationResult,
+    build_canonical_inference_binding_descriptor,
+    compute_inference_binding_hash,
+    create_inference_binding,
+    verify_inference_binding,
+)
+
+binding = create_inference_binding(
+    project_id=project_id,
+    input_identity=input_identity,
+    model_identity=model_identity,
+    input_model_binding=input_model_binding,
+    preprocessing_contract=preprocessing_contract,
+    transformed_input=transformed_input,
+    execution_identity=execution_identity,
+    execution_result=execution_result,
+    output_contract=output_contract,
+    validated_output=validated_output,
+)
+
+verification = verify_inference_binding(
+    binding=binding,
+    project_id=project_id,
+    input_identity=input_identity,
+    model_identity=model_identity,
+    input_model_binding=input_model_binding,
+    preprocessing_contract=preprocessing_contract,
+    transformed_input=transformed_input,
+    execution_identity=execution_identity,
+    execution_result=execution_result,
+    output_contract=output_contract,
+    validated_output=validated_output,
+)
+assert verification.is_valid
+```

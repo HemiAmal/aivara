@@ -1026,7 +1026,60 @@ Models across classification, object detection, semantic segmentation, and embed
 
 ---
 
+#### ADR-097: REST API and Task Integration for End-to-End Inference Verification
+
+**Status:** ACCEPTED (Phase 10.11)
+
+**Context:**
+AIVARA Phase 10 implements an 8-stage offline inference assurance pipeline (Phases 10.2 through 10.10). An orchestration layer is required to expose deterministic, project-isolated HTTP REST endpoints, asynchronous in-memory task lifecycle tracking, real-time Server-Sent Events (SSE) progress broadcasting, sealed record read-back verification, and evidence/provenance querying without introducing duplicate domain logic, new database migrations, or remote dependencies.
+
+**Decision:**
+1. **Orchestration Layer Architecture:** Implement `InferenceService` and `aivara.api.routers.inference` as pure orchestration consumers of existing domain engines (Phases 10.2 through 10.10). No domain cryptography or verification logic is reimplemented inside API routes.
+2. **In-Memory Task Architecture:** Reuse the thread-safe `InferenceTaskManager` pattern with cooperative cancellation and per-subscriber `asyncio.Queue` event distribution for real-time SSE progress streaming (`text/event-stream`).
+3. **Project Boundary Isolation:** Enforce fail-closed project tenant boundaries on every endpoint (POST verify, GET task, GET record, POST verify record, POST replay, GET evidence, GET provenance). Cross-project access raises domain mismatch or entity not found errors.
+4. **Standard Envelope & Safe Serialization:** Wrap all REST responses in `ApiResponse[T]`, sanitizing internal data structures, preventing raw tensor or private key leakage, and preserving the distinction between HTTP transport success and domain verification outcomes.
+5. **Zero Schema Changes:** Reuse existing tables (`ai_models`, `inference_records`, `evidence`, `provenance_records`, `findings`, `projects`, `audit_events`) with 0 database schema changes.
+
+#### ADR-098: Comprehensive End-to-End Inference Verification
+
+**Status:** ACCEPTED (Phase 10.12)
+
+**Context:**
+AIVARA Phase 10 implements an 18-checkpoint inference assurance pipeline spanning input boundaries, model identity envelopes, deterministic preprocessing, controlled execution, output numerical verification, composite cryptographic bindings, immutable persistent records, replay consistency, synthesized evidence, and Ed25519 provenance ledger commits. A comprehensive integration and assurance verifier is required to validate that all individual layers operate consistently as a unified cryptographic proof chain without contradictions, data leakage, or bypassed tenant isolation boundaries.
+
+**Decision:**
+1. **Authoritative 18-Checkpoint Verification Order:** Implement `ComprehensiveInferenceVerifier` executing the strict sequence:
+   (1) Project Tenant Isolation $\rightarrow$
+   (2) Input Identity $\rightarrow$
+   (3) Model Identity Envelope & Master Fingerprint $\rightarrow$
+   (4) Input-Model Binding $\rightarrow$
+   (5) Preprocessing Contract $\rightarrow$
+   (6) Transformed Input Identity & Finiteness $\rightarrow$
+   (7) Controlled Execution Identity $\rightarrow$
+   (8) Raw Output Descriptors $\rightarrow$
+   (9) Output Schema & Geometry Contracts $\rightarrow$
+   (10) Validated Output Identity $\rightarrow$
+   (11) Composite Input-Output Binding (18 fields) $\rightarrow$
+   (12) Inference Record Persistence & Integrity (8 fields) $\rightarrow$
+   (13) Replay Eligibility $\rightarrow$
+   (14) Replay Consistency (Exact / Tolerant) $\rightarrow$
+   (15) Evidence Integrity & Phase 5 Payload Binding $\rightarrow$
+   (16) Provenance Chain Linkage & Hash Sealing $\rightarrow$
+   (17) Cross-Component Contradiction Matrix Detection $\rightarrow$
+   (18) Deterministic Aggregation & Finding Synthesis.
+2. **Cross-Component Contradiction Matrix:** Enforce constant-time equality comparisons (`hmac.compare_digest`) across all mutual identities (e.g. input hash in binding vs input identity, model fingerprint in binding vs envelope, execution hash in binding vs execution, record hash in evidence vs record, evidence hash in provenance vs evidence). Any contradiction immediately fails closed with `INVALID` and logs a dedicated finding.
+3. **Deterministic Aggregation Semantics:**
+   - `OVERALL = VERIFIED`: True if and only if every mandatory proof layer is valid and mutually consistent.
+   - `OVERALL = MISMATCHED`: If any cross-tenant project boundary is violated.
+   - `OVERALL = INVALID`: If any identity hash, descriptor, record, evidence, or replay divergence fails verification.
+   - `OVERALL = MISSING / UNVERIFIABLE`: If required artifacts are absent or indeterminate.
+4. **Strict Proof Confidence:** Maintain $\text{confidence} = 1.0$ for all cryptographic proof-layer assessments per ADR-028.
+5. **Zero Database Schema Changes:** Derive all multi-layer verification results from existing immutable tables without introducing new migrations or storage overhead.
+
+---
+
 *End of Architectural Decision Records*
+
 
 
 

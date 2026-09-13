@@ -578,3 +578,17 @@ class ReportModel(Base):
     __table_args__ = (
         Index("ix_reports_project_id", "project_id"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Aliases for canonical model names
+# ---------------------------------------------------------------------------
+
+Project = ProjectModel
+AIModel = AIModelModel
+Dataset = DatasetModel
+Evidence = EvidenceModel
+Finding = FindingModel
+ProvenanceRecord = ProvenanceRecordModel
+Report = ReportModel
+

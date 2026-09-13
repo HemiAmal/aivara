@@ -245,6 +245,13 @@ from aivara.inference.evidence import (
 )
 
 
+from aivara.inference.comprehensive import (
+    ComprehensiveInferenceService,
+    ComprehensiveInferenceVerificationResult,
+    ComprehensiveInferenceVerifier,
+)
+
+
 __all__ = [
     "InferenceIntegrityStatus",
     "InputKind",
@@ -472,6 +479,10 @@ __all__ = [
     "InferenceEvidenceProvenanceMismatchError",
     "InferenceEvidenceUnavailableError",
     "InferenceEvidenceUnverifiableError",
+    # Phase 10.12 Comprehensive Inference Verification
+    "ComprehensiveInferenceVerificationResult",
+    "ComprehensiveInferenceVerifier",
+    "ComprehensiveInferenceService",
 ]
 
 
