@@ -68,6 +68,14 @@ from aivara.drift.population import (
     filter_sample_records,
     resolve_population_identity,
 )
+from aivara.drift.representation_engine import (
+    RepresentationDistributionShiftAnalyzer,
+    RepresentationExtractor,
+    apply_l2_normalization,
+    compute_representation_contract_hash,
+    compute_representation_drift_profile_hash,
+    preprocess_image_for_representation,
+)
 from aivara.drift.schemas import (
     CategoricalDriftResult,
     ComparisonBoundaryResult,
@@ -84,7 +92,10 @@ from aivara.drift.schemas import (
     MultivariateDriftResult,
     PopulationIdentity,
     PopulationSelector,
+    RepresentationContract,
     RepresentationDescriptor,
+    RepresentationDriftProfile,
+    RepresentationPopulationAccounting,
     SamplingConfig,
     StatisticalAnalysisConfig,
     StatisticalAnalysisResult,
@@ -144,7 +155,12 @@ __all__ = [
     "PopulationSelector",
     "PopulationType",
     "ProjectMismatchError",
+    "RepresentationContract",
     "RepresentationDescriptor",
+    "RepresentationDistributionShiftAnalyzer",
+    "RepresentationDriftProfile",
+    "RepresentationExtractor",
+    "RepresentationPopulationAccounting",
     "ResourceLimitExceededError",
     "SamplingConfig",
     "SamplingMethod",
@@ -155,6 +171,7 @@ __all__ = [
     "StatisticalMethod",
     "apply_benjamini_hochberg",
     "apply_holm_bonferroni",
+    "apply_l2_normalization",
     "apply_multiple_testing_correction",
     "chi2_survival_function",
     "compute_analysis_result_hash",
@@ -169,7 +186,9 @@ __all__ = [
     "compute_permutation_p_value",
     "compute_population_selection_hash",
     "compute_psi",
+    "compute_representation_contract_hash",
     "compute_representation_descriptor_hash",
+    "compute_representation_drift_profile_hash",
     "compute_sample_ids_hash",
     "compute_total_variation_distance",
     "compute_two_sample_ks",
@@ -178,6 +197,7 @@ __all__ = [
     "extract_population_descriptors",
     "extract_single_image_descriptors",
     "filter_sample_records",
+    "preprocess_image_for_representation",
     "resolve_population_identity",
     "sanitize_1d_array",
     "sanitize_2d_array",
@@ -186,4 +206,5 @@ __all__ = [
     "validate_label_compatibility",
     "validate_representation_compatibility",
 ]
+
 

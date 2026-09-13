@@ -572,4 +572,123 @@ class ImageDriftProfile(BaseModel):
         }
 
 
+# ---------------------------------------------------------------------------
+# Phase 11.6 Representation & Embedding Distribution Shift Schemas
+# ---------------------------------------------------------------------------
+
+class RepresentationContract(BaseModel):
+    """Canonical, immutable specification of the learned representation pipeline."""
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = Field(default="1.0", max_length=20)
+    contract_version: str = Field(default="1.0", max_length=20)
+    representation_id: str = Field(..., min_length=1, max_length=100)
+    modality: DataModality = Field(default=DataModality.IMAGE)
+    model_id: str = Field(..., min_length=1, max_length=100)
+    model_master_fingerprint: str = Field(default="", max_length=64)
+    model_artifact_hash: str = Field(default="", max_length=64)
+    model_format: str = Field(default="ONNX", max_length=32)
+    runtime_framework: str = Field(default="onnxruntime", max_length=32)
+    representation_layer: str = Field(default="norm", max_length=100)
+    embedding_dimension: int = Field(default=384, ge=1, le=4096)
+    preprocessing_contract_hash: str = Field(default="", max_length=64)
+    normalization_policy: str = Field(default="L2", max_length=32)
+    numerical_precision: str = Field(default="float32", max_length=32)
+    execution_device_policy: str = Field(default="CPU", max_length=32)
+    batch_size: int = Field(default=32, ge=1, le=1024)
+    representation_contract_hash: str = Field(default="", max_length=64)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "batch_size": self.batch_size,
+            "contract_version": self.contract_version,
+            "embedding_dimension": self.embedding_dimension,
+            "execution_device_policy": self.execution_device_policy,
+            "modality": self.modality.value,
+            "model_artifact_hash": self.model_artifact_hash,
+            "model_format": self.model_format,
+            "model_id": self.model_id,
+            "model_master_fingerprint": self.model_master_fingerprint,
+            "normalization_policy": self.normalization_policy,
+            "numerical_precision": self.numerical_precision,
+            "preprocessing_contract_hash": self.preprocessing_contract_hash,
+            "representation_id": self.representation_id,
+            "representation_layer": self.representation_layer,
+            "runtime_framework": self.runtime_framework,
+            "schema_version": self.schema_version,
+        }
+
+
+class RepresentationPopulationAccounting(BaseModel):
+    """Detailed sample and error accounting for representation extraction and evaluation."""
+    model_config = ConfigDict(frozen=True)
+
+    reference_total_images: int = Field(default=0, ge=0)
+    reference_valid_embeddings: int = Field(default=0, ge=0)
+    reference_extraction_failures: int = Field(default=0, ge=0)
+    reference_invalid_embeddings: int = Field(default=0, ge=0)
+
+    target_total_images: int = Field(default=0, ge=0)
+    target_valid_embeddings: int = Field(default=0, ge=0)
+    target_extraction_failures: int = Field(default=0, ge=0)
+    target_invalid_embeddings: int = Field(default=0, ge=0)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "reference_extraction_failures": self.reference_extraction_failures,
+            "reference_invalid_embeddings": self.reference_invalid_embeddings,
+            "reference_total_images": self.reference_total_images,
+            "reference_valid_embeddings": self.reference_valid_embeddings,
+            "target_extraction_failures": self.target_extraction_failures,
+            "target_invalid_embeddings": self.target_invalid_embeddings,
+            "target_total_images": self.target_total_images,
+            "target_valid_embeddings": self.target_valid_embeddings,
+        }
+
+
+class RepresentationDriftProfile(BaseModel):
+    """High-dimensional representation and embedding distribution shift profile."""
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = Field(default="1.0", max_length=20)
+    analysis_version: str = Field(default="1.0", max_length=20)
+    comparison_boundary_hash: str = Field(..., min_length=64, max_length=64)
+    representation_contract_hash: str = Field(..., min_length=64, max_length=64)
+    statistical_analysis_hash: str = Field(..., min_length=64, max_length=64)
+    representation_drift_profile_hash: str = Field(..., min_length=64, max_length=64)
+    project_id: str = Field(..., min_length=1, max_length=64)
+    reference_dataset_id: str = Field(..., min_length=1, max_length=64)
+    target_dataset_id: str = Field(..., min_length=1, max_length=64)
+    global_status: ShiftDecisionState
+    accounting: RepresentationPopulationAccounting
+    multivariate_result: Optional[MultivariateDriftResult] = None
+    embedding_dimension: int = Field(..., ge=1, le=4096)
+    normalization_policy: str = Field(default="L2", max_length=32)
+    warnings: List[str] = Field(default_factory=list)
+    limitations: List[str] = Field(default_factory=list)
+    findings: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_records: List[Dict[str, Any]] = Field(default_factory=list)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "accounting": self.accounting.to_canonical_dict(),
+            "analysis_version": self.analysis_version,
+            "comparison_boundary_hash": self.comparison_boundary_hash,
+            "embedding_dimension": self.embedding_dimension,
+            "global_status": self.global_status.value,
+            "multivariate_statistic_present": self.multivariate_result is not None,
+            "normalization_policy": self.normalization_policy,
+            "project_id": self.project_id,
+            "reference_dataset_id": self.reference_dataset_id,
+            "representation_contract_hash": self.representation_contract_hash,
+            "schema_version": self.schema_version,
+            "statistical_analysis_hash": self.statistical_analysis_hash,
+            "target_dataset_id": self.target_dataset_id,
+        }
+
+
+
 
