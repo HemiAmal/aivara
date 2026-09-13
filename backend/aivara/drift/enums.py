@@ -138,4 +138,47 @@ class TimestampSource(str, Enum):
     INGESTION_TIME = "ingestion_time"
 
 
+class SourceType(str, Enum):
+    """Supported source attribute dimensions."""
+    CONTRIBUTOR = "contributor"
+    ACQUISITION_CHANNEL = "acquisition_channel"
+    COLLECTION_SITE = "collection_site"
+    DEVICE_HARDWARE = "device_hardware"
+    PIPELINE_VERSION = "pipeline_version"
+    CUSTOM = "custom"
+
+
+class SourceTrustState(str, Enum):
+    """Evaluation trust state of claimed vs verified source identity."""
+    CLAIMED = "claimed"
+    VERIFIED = "verified"
+    ASSERTED = "asserted"
+    UNVERIFIED = "unverified"
+    INVALID = "invalid"
+    UNKNOWN = "unknown"
+
+
+class SourceComparisonTopology(str, Enum):
+    """Comparison topology for source groups."""
+    SOURCE_VS_REFERENCE = "source_vs_reference"
+    SOURCE_VS_BASELINE_POPULATION = "source_vs_baseline_population"
+
+
+class SourceGroupStatus(str, Enum):
+    """Operational eligibility status of a source partition group."""
+    ELIGIBLE = "eligible"
+    INSUFFICIENT_DATA = "insufficient_data"
+    INVALID = "invalid"
+    UNKNOWN = "unknown"
+    EXCLUDED = "excluded"
+
+
+class SourceAttributeFallbackPolicy(str, Enum):
+    """Fallback handling policy for missing or malformed source metadata."""
+    FAIL_CLOSED = "fail_closed"
+    ASSIGN_UNKNOWN = "assign_unknown"
+    ASSIGN_MISSING = "assign_missing"
+
+
+
 

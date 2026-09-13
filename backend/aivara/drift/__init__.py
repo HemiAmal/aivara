@@ -138,6 +138,33 @@ from aivara.drift.temporal_engine import (
     sort_temporal_observations,
 )
 
+from aivara.drift.source_engine import (
+    SourceDistributionShiftEngine,
+    canonicalize_source_id,
+    compute_source_analysis_profile_hash,
+    compute_source_contract_hash,
+    compute_source_group_hash,
+    derive_project_scoped_pseudonym,
+    extract_source_context,
+)
+from aivara.drift.enums import (
+    SourceAttributeFallbackPolicy,
+    SourceComparisonTopology,
+    SourceGroupStatus,
+    SourceTrustState,
+    SourceType,
+)
+from aivara.drift.schemas import (
+    SourceAnalysisContract,
+    SourceAnalysisProfile,
+    SourceAttributeSelector,
+    SourceComparisonResult,
+    SourceContext,
+    SourceGroupAccounting,
+    SourceGroupDescriptor,
+    SourceObservation,
+)
+
 __all__ = [
     "BoundaryEvaluationStatus",
     "CategoricalDriftResult",
@@ -185,6 +212,20 @@ __all__ = [
     "SamplingConfig",
     "SamplingMethod",
     "ShiftDecisionState",
+    "SourceAnalysisContract",
+    "SourceAnalysisProfile",
+    "SourceAttributeFallbackPolicy",
+    "SourceAttributeSelector",
+    "SourceComparisonResult",
+    "SourceComparisonTopology",
+    "SourceContext",
+    "SourceDistributionShiftEngine",
+    "SourceGroupAccounting",
+    "SourceGroupDescriptor",
+    "SourceGroupStatus",
+    "SourceObservation",
+    "SourceTrustState",
+    "SourceType",
     "StatisticalAnalysisConfig",
     "StatisticalAnalysisResult",
     "StatisticalDriftEngine",
@@ -204,6 +245,7 @@ __all__ = [
     "apply_holm_bonferroni",
     "apply_l2_normalization",
     "apply_multiple_testing_correction",
+    "canonicalize_source_id",
     "chi2_survival_function",
     "compute_analysis_result_hash",
     "compute_chi_square_test",
@@ -221,15 +263,20 @@ __all__ = [
     "compute_representation_descriptor_hash",
     "compute_representation_drift_profile_hash",
     "compute_sample_ids_hash",
+    "compute_source_analysis_profile_hash",
+    "compute_source_contract_hash",
+    "compute_source_group_hash",
     "compute_temporal_contract_hash",
     "compute_temporal_drift_profile_hash",
     "compute_temporal_window_hash",
     "compute_total_variation_distance",
     "compute_two_sample_ks",
     "compute_wasserstein_1d",
+    "derive_project_scoped_pseudonym",
     "deterministic_subsample",
     "extract_population_descriptors",
     "extract_single_image_descriptors",
+    "extract_source_context",
     "filter_sample_records",
     "normalize_timestamp_utc",
     "preprocess_image_for_representation",
@@ -242,6 +289,7 @@ __all__ = [
     "validate_label_compatibility",
     "validate_representation_compatibility",
 ]
+
 
 
 

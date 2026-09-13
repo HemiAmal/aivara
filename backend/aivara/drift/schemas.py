@@ -21,6 +21,11 @@ from aivara.drift.enums import (
     TemporalTrajectoryState,
     TemporalWindowStrategy,
     TimestampSource,
+    SourceAttributeFallbackPolicy,
+    SourceComparisonTopology,
+    SourceGroupStatus,
+    SourceTrustState,
+    SourceType,
 )
 
 
@@ -913,6 +918,253 @@ class TemporalAnalysisProfile(BaseModel):
             "total_temporal_span_seconds": float(self.total_temporal_span_seconds),
             "windows_count": len(self.windows),
         }
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.8 Contributor & Source-Aware Distribution Shift Schemas
+# ---------------------------------------------------------------------------
+
+class SourceContext(BaseModel):
+    """Provenance and trust context associated with an individual data source or contributor."""
+    model_config = ConfigDict(frozen=True)
+
+    raw_source_id: Optional[str] = None
+    source_type: SourceType = Field(default=SourceType.CONTRIBUTOR)
+    canonical_source_id: str = Field(..., min_length=1, max_length=128)
+    pseudonym_id: str = Field(..., min_length=1, max_length=64)
+    trust_state: SourceTrustState = Field(default=SourceTrustState.CLAIMED)
+    metadata_version: str = Field(default="1.0", max_length=20)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "canonical_source_id": self.canonical_source_id,
+            "metadata_version": self.metadata_version,
+            "pseudonym_id": self.pseudonym_id,
+            "source_type": self.source_type.value,
+            "trust_state": self.trust_state.value,
+        }
+
+
+class SourceAttributeSelector(BaseModel):
+    """Declarative selector for extracting source/contributor attributes from observation metadata."""
+    model_config = ConfigDict(frozen=True)
+
+    attribute_key: str = Field(default="contributor_id", min_length=1, max_length=100)
+    source_type: SourceType = Field(default=SourceType.CONTRIBUTOR)
+    fallback_policy: SourceAttributeFallbackPolicy = Field(default=SourceAttributeFallbackPolicy.ASSIGN_MISSING)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "attribute_key": self.attribute_key,
+            "fallback_policy": self.fallback_policy.value,
+            "source_type": self.source_type.value,
+        }
+
+
+class SourceObservation(BaseModel):
+    """Observation item bound to a validated source context."""
+    model_config = ConfigDict(frozen=True)
+
+    sample_id: str = Field(..., min_length=1, max_length=128)
+    source_context: SourceContext
+    payload: Any = Field(default=None, description="Observation payload (feature vector, image, or precomputed embedding).")
+    label: Optional[str] = Field(default=None, max_length=100)
+    timestamp_utc: Optional[str] = Field(default=None, max_length=40)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceGroupAccounting(BaseModel):
+    """Detailed sample and partition error accounting for source distribution analysis."""
+    model_config = ConfigDict(frozen=True)
+
+    total_observations: int = Field(default=0, ge=0)
+    eligible_observations: int = Field(default=0, ge=0)
+    insufficient_observations: int = Field(default=0, ge=0)
+    missing_source_observations: int = Field(default=0, ge=0)
+    invalid_source_observations: int = Field(default=0, ge=0)
+    unknown_source_observations: int = Field(default=0, ge=0)
+    total_groups_formed: int = Field(default=0, ge=0)
+    eligible_groups_count: int = Field(default=0, ge=0)
+    insufficient_groups_count: int = Field(default=0, ge=0)
+    sub_threshold_sample_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    excessive_fragmentation_detected: bool = Field(default=False)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "eligible_groups_count": self.eligible_groups_count,
+            "eligible_observations": self.eligible_observations,
+            "excessive_fragmentation_detected": self.excessive_fragmentation_detected,
+            "insufficient_groups_count": self.insufficient_groups_count,
+            "insufficient_observations": self.insufficient_observations,
+            "invalid_source_observations": self.invalid_source_observations,
+            "missing_source_observations": self.missing_source_observations,
+            "sub_threshold_sample_ratio": float(self.sub_threshold_sample_ratio),
+            "total_groups_formed": self.total_groups_formed,
+            "total_observations": self.total_observations,
+            "unknown_source_observations": self.unknown_source_observations,
+        }
+
+
+class SourceGroupDescriptor(BaseModel):
+    """Deterministic cryptographic descriptor for an individual source partition group."""
+    model_config = ConfigDict(frozen=True)
+
+    source_id: str = Field(..., min_length=1, max_length=128)
+    canonical_source_id: str = Field(..., min_length=1, max_length=128)
+    pseudonym_id: str = Field(..., min_length=1, max_length=64)
+    source_type: SourceType = Field(default=SourceType.CONTRIBUTOR)
+    sample_count: int = Field(..., ge=0)
+    status: SourceGroupStatus = Field(default=SourceGroupStatus.ELIGIBLE)
+    class_proportions: Dict[str, float] = Field(default_factory=dict)
+    earliest_timestamp_utc: Optional[str] = None
+    latest_timestamp_utc: Optional[str] = None
+    group_hash: str = Field(..., min_length=64, max_length=64)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "canonical_source_id": self.canonical_source_id,
+            "class_proportions": {k: float(v) for k, v in sorted(self.class_proportions.items())},
+            "earliest_timestamp_utc": self.earliest_timestamp_utc or "",
+            "latest_timestamp_utc": self.latest_timestamp_utc or "",
+            "pseudonym_id": self.pseudonym_id,
+            "sample_count": self.sample_count,
+            "source_id": self.source_id,
+            "source_type": self.source_type.value,
+            "status": self.status.value,
+        }
+
+
+class SourceComparisonResult(BaseModel):
+    """Evaluation result for a source-vs-reference statistical comparison."""
+    model_config = ConfigDict(frozen=True)
+
+    comparison_id: str = Field(..., min_length=1, max_length=100)
+    target_source_id: str = Field(..., min_length=1, max_length=128)
+    target_pseudonym_id: str = Field(..., min_length=1, max_length=64)
+    reference_source_id: str = Field(..., min_length=1, max_length=128)
+    target_sample_count: int = Field(..., ge=0)
+    reference_sample_count: int = Field(..., ge=0)
+    feature_name: str = Field(default="overall", min_length=1, max_length=100)
+    modality: DataModality = Field(default=DataModality.TABULAR_FEATURE)
+    statistic_method: str = Field(default="kolmogorov_smirnov_2sample", max_length=64)
+    statistic_value: float = Field(default=0.0)
+    raw_p_value: Optional[float] = None
+    adjusted_p_value: Optional[float] = None
+    effect_size: float = Field(default=0.0)
+    effect_metric: str = Field(default="psi", max_length=32)
+    is_statistically_significant: bool = False
+    is_practically_significant: bool = False
+    status: ShiftDecisionState = ShiftDecisionState.NO_SHIFT_DETECTED
+    potential_label_confounding: bool = False
+    label_tvd: float = Field(default=0.0, ge=0.0, le=1.0)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "adjusted_p_value": self.adjusted_p_value if self.adjusted_p_value is not None else -1.0,
+            "comparison_id": self.comparison_id,
+            "effect_metric": self.effect_metric,
+            "effect_size": float(self.effect_size),
+            "feature_name": self.feature_name,
+            "is_practically_significant": self.is_practically_significant,
+            "is_statistically_significant": self.is_statistically_significant,
+            "label_tvd": float(self.label_tvd),
+            "modality": self.modality.value,
+            "potential_label_confounding": self.potential_label_confounding,
+            "raw_p_value": self.raw_p_value if self.raw_p_value is not None else -1.0,
+            "reference_sample_count": self.reference_sample_count,
+            "reference_source_id": self.reference_source_id,
+            "statistic_method": self.statistic_method,
+            "statistic_value": float(self.statistic_value),
+            "status": self.status.value,
+            "target_pseudonym_id": self.target_pseudonym_id,
+            "target_sample_count": self.target_sample_count,
+            "target_source_id": self.target_source_id,
+        }
+
+
+class SourceAnalysisContract(BaseModel):
+    """Canonical, immutable specification for source-aware distribution-shift evaluation."""
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = Field(default="1.0", max_length=20)
+    contract_version: str = Field(default="1.0", max_length=20)
+    source_analysis_id: str = Field(..., min_length=1, max_length=100)
+    selector: SourceAttributeSelector = Field(default_factory=SourceAttributeSelector)
+    comparison_topology: SourceComparisonTopology = Field(default=SourceComparisonTopology.SOURCE_VS_REFERENCE)
+    reference_source_id: Optional[str] = Field(default=None, max_length=128)
+    min_group_samples: int = Field(default=30, ge=5, le=5000)
+    max_group_samples: int = Field(default=5000, ge=30, le=5000)
+    max_source_groups: int = Field(default=50, ge=2, le=50)
+    subsampling_seed: int = Field(default=42)
+    fdr_alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
+    source_contract_hash: str = Field(default="", max_length=64)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "comparison_topology": self.comparison_topology.value,
+            "contract_version": self.contract_version,
+            "fdr_alpha": float(self.fdr_alpha),
+            "max_group_samples": int(self.max_group_samples),
+            "max_source_groups": int(self.max_source_groups),
+            "min_group_samples": int(self.min_group_samples),
+            "reference_source_id": self.reference_source_id or "",
+            "schema_version": self.schema_version,
+            "selector": self.selector.to_canonical_dict(),
+            "source_analysis_id": self.source_analysis_id,
+            "subsampling_seed": int(self.subsampling_seed),
+        }
+
+
+class SourceAnalysisProfile(BaseModel):
+    """Comprehensive contributor and source-aware distribution shift evaluation profile."""
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = Field(default="1.0", max_length=20)
+    analysis_version: str = Field(default="1.0", max_length=20)
+    comparison_boundary_hash: str = Field(..., min_length=64, max_length=64)
+    source_contract_hash: str = Field(..., min_length=64, max_length=64)
+    source_analysis_profile_hash: str = Field(..., min_length=64, max_length=64)
+    project_id: str = Field(..., min_length=1, max_length=64)
+    reference_dataset_id: str = Field(..., min_length=1, max_length=64)
+    target_dataset_id: str = Field(..., min_length=1, max_length=64)
+    global_status: ShiftDecisionState
+    accounting: SourceGroupAccounting
+    reference_group: Optional[SourceGroupDescriptor] = None
+    source_groups: List[SourceGroupDescriptor] = Field(default_factory=list)
+    comparisons: List[SourceComparisonResult] = Field(default_factory=list)
+    ranked_source_ids: List[str] = Field(default_factory=list)
+    confounded_source_count: int = Field(default=0, ge=0)
+    warnings: List[str] = Field(default_factory=list)
+    limitations: List[str] = Field(default_factory=list)
+    findings: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_records: List[Dict[str, Any]] = Field(default_factory=list)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "accounting": self.accounting.to_canonical_dict(),
+            "analysis_version": self.analysis_version,
+            "comparison_boundary_hash": self.comparison_boundary_hash,
+            "comparisons": [c.to_canonical_dict() for c in self.comparisons],
+            "confounded_source_count": self.confounded_source_count,
+            "global_status": self.global_status.value,
+            "project_id": self.project_id,
+            "ranked_source_ids": self.ranked_source_ids,
+            "reference_dataset_id": self.reference_dataset_id,
+            "schema_version": self.schema_version,
+            "source_contract_hash": self.source_contract_hash,
+            "source_groups": [g.to_canonical_dict() for g in self.source_groups],
+            "target_dataset_id": self.target_dataset_id,
+        }
+
 
 
 

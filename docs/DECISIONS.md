@@ -1115,7 +1115,30 @@ Production AI dataset streams and continuous model operations encounter non-stat
 
 ---
 
+#### ADR-101: Contributor and Source-Aware Distribution Shift Architecture
+
+**Status:** PERMANENTLY FROZEN (Phase 11.8)
+
+**Context:**
+Real-world machine learning datasets aggregate samples across heterogeneous contributors, collection sites, hardware sensors, and data pipelines. Systematic distributional divergences across data sources can compromise model generalization, introduce fairness disparities, and distort baseline assurance profiles. An authoritative, deterministic, offline assurance framework is required to partition populations by provenance metadata and quantify source-associated divergence against certified reference baselines without confounding statistical shift with malicious intent or creating privacy risks.
+
+**Decision:**
+1. **Generic Source Context & Trust Model:** Implement a generic `SourceContext` abstraction spanning contributors, acquisition channels, collection sites, hardware devices, and pipeline versions. Treat ingested source metadata strictly as Layer 1 claimed metadata (unauthenticated assertions), clearly separated from Layer 2 cryptographic proof.
+2. **Deterministic Canonicalization Pipeline:** Enforce a strict 5-stage canonicalization order: Unicode NFKC normalization $\to$ non-printable character stripping $\to$ whitespace collapse $\to$ lowercase folding $\to$ 128-character length capping.
+3. **Linear $O(G)$ Comparison Topology:** Execute comparisons exclusively using an $O(G)$ Source-vs-Reference topology ($\mathcal{P}_{s_g} \leftrightarrow \mathcal{P}_{\text{ref}}$). Prohibit quadratic $O(G^2)$ all-pairs comparisons in v1 to preserve computational bounds and avoid excessive FDR multiplicity penalties.
+4. **Complete Reconciliation Accounting:** Mandate strict sample accounting: $\text{Total} = \text{Eligible} (N \ge 30) + \text{Insufficient} (N < 30) + \text{Missing} + \text{Invalid} + \text{Unknown}$. High sub-threshold volume ($>20\%$) triggers an explicit `EXCESSIVE_SOURCE_FRAGMENTATION` advisory finding.
+5. **Statistical Authority Reuse & Dual Gating:** Delegate 100% of two-sample hypothesis testing to Phase 11.3 `StatisticalDriftEngine` (KS, Chi-Square, MMD, Energy Distance). Apply Benjamini–Hochberg FDR control ($q^* = 0.05$) per comparison family and enforce dual gating: shift requires both $p_{\text{adj}} \le 0.05$ and physical effect thresholds ($\text{PSI} \ge 0.10$, $\text{TVD} \ge 0.05$, $\text{MMD}^2 \ge 0.02$, $\text{Energy} \ge 1.0$).
+6. **Simpson's Paradox & Confounding Protection:** Simultaneously evaluate marginal feature shift $\mathcal{P}(X \mid S)$ and class distribution skew $\mathcal{P}(Y \mid S)$. When class proportion $\text{TVD} \ge 0.15$, emit an automated label confounding advisory to prevent misinterpreting class specialization as sensor drift.
+7. **Project-Scoped Pseudonymization & Privacy:** Protect contributor confidentiality by deterministically pseudonymizing identifiers: $\text{Pseudonym} = \text{SHA-256}(\text{project\_id} \mathbin{\Vert} \text{salt} \mathbin{\Vert} \text{canonical\_id})[:16]$. Strictly prohibit cross-project linkability and raw PII persistence.
+8. **Cryptographic Identity & Immutability:** Anchor all group descriptors and analysis profiles with RFC 8785 JSON Canonicalization Scheme (JCS) + SHA-256 digests.
+9. **Resource Ceilings & Deterministic Subsampling:** Enforce hard resource limits: $G \le 50$ maximum source groups, $N_{\text{min}} = 30$ sample floor, and $N_{\text{max}} = 5000$ per-group sample budget with Phase 11.2 seeded PRNG subsampling.
+10. **Non-Attribution Invariant:** Restrict findings strictly to descriptive detection observations (`finding_type="source_distribution_shift"`, `evidence_layer="detection"`). Source-associated shift indicates statistical divergence and does NOT prove malicious intent, dataset poisoning, or contributor fraud.
+11. **Zero Database Schema Changes:** Store all source profiles, accounting metrics, and finding payloads in existing SQLite tables with 0 new migrations.
+
+---
+
 *End of Architectural Decision Records*
+
 
 
 
