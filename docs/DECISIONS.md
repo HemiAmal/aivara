@@ -1192,9 +1192,31 @@ The Phase 11 Distribution Shift subsystem encompasses 8 analytical and integrati
 5. **Zero Production Changes Invariant:** The verification architecture strictly mandates 0 modifications to frozen backend engines (`backend/aivara/drift/`, `backend/aivara/assurance/`), 0 database schema changes, 0 migrations, and 0 new dependencies.
 6. **Air-Gap Strictness:** Require 100% offline execution with zero outbound network calls, zero DNS lookups, zero cloud telemetry, and zero unauthenticated model downloads.
 
+#### ADR-105: Universal Risk Engine Architecture and Requirements Baseline
+
+**Status:** PROPOSED / ARCHITECTURE FROZEN (Phase 12.1)
+
+**Context:**
+AIVARA has established and permanently frozen 7 upstream specialized assurance and detection domains spanning Phases 4 through 11 (Dataset Integrity, Contributor Risk, Model Integrity, Behavioral Analysis, Backdoor/Triggers, Inference Integrity, and Distribution Shift). Each upstream subsystem generates localized findings and evidence scoped to individual artifacts. An authoritative, deterministic, offline, and cryptographically auditable Universal Risk Engine (URE) is required to synthesize multi-domain evidence, traverse $N:M$ finding-evidence graphs, model hierarchical asset and project risks, enforce non-compensable proof invariants, and evaluate policy-driven operational dispositions (`ACCEPT`, `REVIEW`, `QUARANTINE`, `REJECT`) without duplicate detection math, uncalibrated ML risk scoring, or intent attribution.
+
+**Decision:**
+1. **Phase 12 Ownership & Scope:** Designate Phase 12 as the sole authority for universal multi-asset risk synthesis, $N:M$ evidence graph traversal, cross-domain correlation damping, enterprise policy governance, and final project disposition decisioning.
+2. **Upstream Subsystem Decoupling:** Phase 12 strictly consumes outputs from upstream subsystems without reimplementing or duplicating detection algorithms.
+3. **Phase 11.9 Boundary & Extension:** Phase 12 reuses Phase 11.9's mathematical principles (sub-additive saturation, proof non-compensability, JCS hashing) and extends them from single-asset distribution drift to multi-asset and project-wide graph hierarchies.
+4. **$N:M$ Finding-Evidence Graph Architecture:** Formalize $N:M$ bindings between Findings and Evidence via a logical `finding_evidence` junction model, operating initially on existing Phase 3–11 entities and maintaining 100% backward compatibility with legacy 1:N foreign keys while bounding traversal depth ($\Delta \le 5$) and breadth ($\beta \le 100$) with strict cycle detection.
+5. **Hierarchical 3-Tier Risk Modeling:** Compute risk across 3 distinct tiers: (1) Asset-Level Risk $R(A)$, (2) Cross-Asset Lineage Risk $R_{\text{chain}}$, and (3) Project-Level Operational Risk $R_{\text{project}}$, with all scores bounded in $[0.0, 1.0]$ and unrelated assets mathematically isolated.
+6. **Strict Proof Non-Compensability & Affected Scope:** Inviolably enforce that an active proof-layer failure on Asset $A$ immediately forces Asset $A$'s risk to $R(A)=1.0$ and disposition to $\mathbf{REJECT}$. Unrelated assets are not automatically rejected. Core deployed asset proof failures force project disposition to $\mathbf{REJECT}$.
+7. **Two-Stage Correlation Damping ($7 \times 7$ Matrix):** Apply ancestry clustering and a symmetric $7 \times 7$ inter-domain correlation matrix $\mathbf{C} \in [0.0, 1.0]^{7 \times 7}$ with mandatory zero diagonal ($\mathbf{C}_{ii} = 0.0$) and exact canonical domain ordering to damp co-occurring multi-symptom defects without attenuating proof violations. Missing ancestry fails safely without fabricating data.
+8. **Versioned Cryptographic Policy Governance:** Bind all evaluations to immutable, content-addressed `UniversalRiskPolicy` and `UniversalDecisionPolicy` specifications using RFC 8785 JCS + SHA-256 digests (`risk_policy_hash`, `decision_policy_hash`, `correlation_matrix_hash`).
+9. **Tamper-Evident Assurance Dossier & Provenance Chain:** Enforce an unbroken cryptographic chain ($\text{Dossier} \to \text{Decision} \to \text{Risk} \to \text{Contribution} \to \text{Finding} \to \text{Evidence} \to \text{Provenance}$) and synthesize an exportable, self-verifying `UniversalAssuranceDossier` signed with optional local Ed25519 keys.
+10. **Resource Governance (Ceilings, Complexity & Targets):** Enforce mandatory hard safety ceilings ($E \le 5000, F \le 1000, A \le 250, \Delta \le 5, \beta \le 100$) with fail-closed rejection, guaranteed $O(V+E)$ algorithmic complexity, and empirical workstation acceptance targets ($< 2.0\text{s}$ execution time, $< 150\text{MB}$ peak RSS).
+11. **100% Offline Air-Gap Compliance:** Guarantee local execution with 0 outbound network calls, 0 new runtime dependencies, 0 schema breaking changes, and complete tenant isolation.
+12. **Proposed Subphase Roadmap:** Authorize the proposed Phase 12 subphase progression (Phases 12.1 through 12.11) as PROPOSED — NOT YET FROZEN pending independent milestone audit.
+
 ---
 
 *End of Architectural Decision Records*
+
 
 
 
