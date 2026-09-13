@@ -1137,6 +1137,27 @@ Real-world machine learning datasets aggregate samples across heterogeneous cont
 
 ---
 
+#### ADR-102: Evidence, Findings, and Multi-Modal Risk Integration Architecture
+
+**Status:** ACCEPTED (Phase 11.9)
+
+**Context:**
+AIVARA generates heterogeneous verification, integrity, behavioral, and distribution-shift evidence across 8+ specialized subsystems (Phases 4–10 and 11.1–11.8). An authoritative, deterministic, offline integration framework is required to ingest, deduplicate, dependency-cluster, and synthesize these multi-modal evidence signals into calibrated risk scores and policy-driven operational dispositions (`ACCEPT`, `REVIEW`, `QUARANTINE`, `REJECT`, `INSUFFICIENT_EVIDENCE`) without conflating statistical observation with malicious intent, double-counting correlated evidence, or generating uncalibrated pseudo-probabilities of attacks.
+
+**Decision:**
+1. **5-Stage Synthesis Pipeline:** Enforce the strict unidirectional transformation pipeline: $\text{Evidence} \longrightarrow \text{Finding} \longrightarrow \text{Confidence} \longrightarrow \text{Risk} \longrightarrow \text{Decision}$. Every transition must preserve full cryptographic provenance linkage.
+2. **Strict Layer Separation & Proof Non-Compensability:** Segregate non-compensable Proof Layer evidence ($\text{Confidence} = 1.0$) from probabilistic Detection Layer evidence ($\text{Confidence} \in [0.0, 1.0]$). Any active Proof Layer violation immediately triggers a mandatory $\mathbf{REJECT}$ disposition and cannot be diluted by high statistical p-values.
+3. **Ancestry-Based Evidence Clustering:** Cluster evidence items sharing the same primary asset ancestor (`dataset_version_id`, `model_fingerprint`, `source_group_id`, `window_id`) into unified Modality Clusters. Apply an inter-modality correlation damping coefficient ($\lambda_{\text{corr}} = 0.10$) to prevent multi-modal double counting on the same underlying physical artifact.
+4. **Sub-Additive Bounded Risk Aggregation:** Aggregate cluster scores using bounded asymptotic saturation: $R = 1.0 - \prod_{k=1}^K (1.0 - S(\mathcal{C}_k))$ with $R \in [0.0, 1.0]$. Strictly prohibit black-box neural/ML risk scoring and uncalibrated attack probabilities.
+5. **Deterministic Policy Disposition Mapping:** Map calibrated risk scores to versioned disposition thresholds: $R < 0.30 \implies \mathbf{ACCEPT}$, $0.30 \le R < 0.65 \implies \mathbf{REVIEW}$, $0.65 \le R < 0.85 \implies \mathbf{QUARANTINE}$, $R \ge 0.85 \implies \mathbf{REJECT}$.
+6. **Safe Fail-Closed Defaults:** Unanalyzed dimensions or missing required modalities emit $\mathbf{INSUFFICIENT\_EVIDENCE}$ and route to human review. The engine strictly upholds $\text{Absence of Evidence} \ne \text{Proof of Safety}$.
+7. **Semantic Non-Attribution Invariant:** Finding descriptions and rationales must remain descriptive and observational. Never infer malicious intent, contributor culpability, or causal attribution from statistical distribution shift alone.
+8. **Cryptographic Grounding & Immutability:** Anchor all integrated assurance profiles, evidence sets, and policy configurations using RFC 8785 Canonical JSON Serialization (JCS) and SHA-256 digests (`integrated_profile_hash`, `evidence_set_hash`, `risk_policy_hash`, `decision_policy_hash`).
+9. **Resource Ceilings & Performance Boundedness:** Enforce hard bounds: $E \le 1000$ evidence items and $F \le 200$ findings per run, guaranteeing linear $O(E)$ time execution and $<100\text{MB}$ memory overhead.
+10. **Zero Database Schema Changes:** Store all synthesized profiles and risk assessments in existing SQLite tables with 0 new migrations.
+
+---
+
 *End of Architectural Decision Records*
 
 
