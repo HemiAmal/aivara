@@ -31,6 +31,10 @@ from aivara.drift.enums import (
     SamplingMethod,
     ShiftDecisionState,
     StatisticalMethod,
+    TemporalComparisonTopology,
+    TemporalTrajectoryState,
+    TemporalWindowStrategy,
+    TimestampSource,
 )
 from aivara.drift.exceptions import (
     DistributionBoundaryError,
@@ -78,6 +82,7 @@ from aivara.drift.representation_engine import (
 )
 from aivara.drift.schemas import (
     CategoricalDriftResult,
+    ChangePointCandidate,
     ComparisonBoundaryResult,
     ComparisonContract,
     DatasetDriftProfile,
@@ -99,6 +104,12 @@ from aivara.drift.schemas import (
     SamplingConfig,
     StatisticalAnalysisConfig,
     StatisticalAnalysisResult,
+    TemporalAnalysisContract,
+    TemporalAnalysisProfile,
+    TemporalComparisonResult,
+    TemporalObservation,
+    TemporalWindowAccounting,
+    TemporalWindowDescriptor,
 )
 from aivara.drift.stats_categorical import (
     chi2_survival_function,
@@ -118,10 +129,19 @@ from aivara.drift.stats_multivariate import (
     compute_permutation_p_value,
     sanitize_2d_array,
 )
+from aivara.drift.temporal_engine import (
+    TemporalDistributionShiftAnalyzer,
+    compute_temporal_contract_hash,
+    compute_temporal_drift_profile_hash,
+    compute_temporal_window_hash,
+    normalize_timestamp_utc,
+    sort_temporal_observations,
+)
 
 __all__ = [
     "BoundaryEvaluationStatus",
     "CategoricalDriftResult",
+    "ChangePointCandidate",
     "CompatibilityStatus",
     "ComparisonBoundaryEngine",
     "ComparisonBoundaryResult",
@@ -169,6 +189,17 @@ __all__ = [
     "StatisticalAnalysisResult",
     "StatisticalDriftEngine",
     "StatisticalMethod",
+    "TemporalAnalysisContract",
+    "TemporalAnalysisProfile",
+    "TemporalComparisonResult",
+    "TemporalComparisonTopology",
+    "TemporalDistributionShiftAnalyzer",
+    "TemporalObservation",
+    "TemporalTrajectoryState",
+    "TemporalWindowAccounting",
+    "TemporalWindowDescriptor",
+    "TemporalWindowStrategy",
+    "TimestampSource",
     "apply_benjamini_hochberg",
     "apply_holm_bonferroni",
     "apply_l2_normalization",
@@ -190,6 +221,9 @@ __all__ = [
     "compute_representation_descriptor_hash",
     "compute_representation_drift_profile_hash",
     "compute_sample_ids_hash",
+    "compute_temporal_contract_hash",
+    "compute_temporal_drift_profile_hash",
+    "compute_temporal_window_hash",
     "compute_total_variation_distance",
     "compute_two_sample_ks",
     "compute_wasserstein_1d",
@@ -197,14 +231,17 @@ __all__ = [
     "extract_population_descriptors",
     "extract_single_image_descriptors",
     "filter_sample_records",
+    "normalize_timestamp_utc",
     "preprocess_image_for_representation",
     "resolve_population_identity",
     "sanitize_1d_array",
     "sanitize_2d_array",
+    "sort_temporal_observations",
     "validate_feature_compatibility",
     "validate_image_compatibility",
     "validate_label_compatibility",
     "validate_representation_compatibility",
 ]
+
 
 

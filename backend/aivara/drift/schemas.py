@@ -17,6 +17,10 @@ from aivara.drift.enums import (
     SamplingMethod,
     ShiftDecisionState,
     StatisticalMethod,
+    TemporalComparisonTopology,
+    TemporalTrajectoryState,
+    TemporalWindowStrategy,
+    TimestampSource,
 )
 
 
@@ -688,6 +692,228 @@ class RepresentationDriftProfile(BaseModel):
             "statistical_analysis_hash": self.statistical_analysis_hash,
             "target_dataset_id": self.target_dataset_id,
         }
+
+
+# ---------------------------------------------------------------------------
+# Phase 11.7 Temporal & Windowed Distribution Shift Schemas
+# ---------------------------------------------------------------------------
+
+class TemporalObservation(BaseModel):
+    """Abstraction for a time-indexed observation within a population dataset."""
+    model_config = ConfigDict(frozen=True)
+
+    sample_id: str = Field(..., min_length=1, max_length=128)
+    timestamp_raw: Any = Field(..., description="Raw timestamp input (ISO string, datetime, float/int seconds).")
+    normalized_timestamp_utc: str = Field(..., min_length=20, max_length=40, description="ISO 8601 UTC string.")
+    payload: Any = Field(default=None, description="Observation payload (feature vector, image, or precomputed embedding).")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TemporalAnalysisContract(BaseModel):
+    """Canonical, immutable specification for temporal and windowed distribution-shift evaluation."""
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = Field(default="1.0", max_length=20)
+    contract_version: str = Field(default="1.0", max_length=20)
+    temporal_analysis_id: str = Field(..., min_length=1, max_length=100)
+    timestamp_field: TimestampSource = Field(default=TimestampSource.EVENT_TIME)
+    timezone_policy: str = Field(default="UTC", max_length=32)
+    window_strategy: TemporalWindowStrategy = Field(default=TemporalWindowStrategy.FIXED_INTERVAL)
+    window_size_seconds: float = Field(default=86400.0, gt=0.0, description="Window time duration in seconds (default: 1 day).")
+    step_size_seconds: Optional[float] = Field(default=None, gt=0.0, description="Step size for sliding window (must be >= window_size/2).")
+    max_windows: int = Field(default=50, ge=2, le=50)
+    min_window_samples: int = Field(default=30, ge=5, le=5000)
+    max_window_samples: int = Field(default=5000, ge=30, le=5000)
+    baseline_policy: str = Field(default="first_window", max_length=64)
+    comparison_topology: TemporalComparisonTopology = Field(default=TemporalComparisonTopology.DUAL_TOPOLOGY)
+    declared_seasonality_period_seconds: Optional[float] = Field(default=None, gt=0.0)
+    temporal_contract_hash: str = Field(default="", max_length=64)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "baseline_policy": self.baseline_policy,
+            "comparison_topology": self.comparison_topology.value,
+            "contract_version": self.contract_version,
+            "declared_seasonality_period_seconds": float(self.declared_seasonality_period_seconds) if self.declared_seasonality_period_seconds is not None else -1.0,
+            "max_window_samples": int(self.max_window_samples),
+            "max_windows": int(self.max_windows),
+            "min_window_samples": int(self.min_window_samples),
+            "schema_version": self.schema_version,
+            "step_size_seconds": float(self.step_size_seconds) if self.step_size_seconds is not None else -1.0,
+            "temporal_analysis_id": self.temporal_analysis_id,
+            "timestamp_field": self.timestamp_field.value,
+            "timezone_policy": self.timezone_policy,
+            "window_size_seconds": float(self.window_size_seconds),
+            "window_strategy": self.window_strategy.value,
+        }
+
+
+class TemporalWindowAccounting(BaseModel):
+    """Detailed sample and window error accounting for temporal analysis."""
+    model_config = ConfigDict(frozen=True)
+
+    total_observations: int = Field(default=0, ge=0)
+    valid_timestamp_observations: int = Field(default=0, ge=0)
+    missing_timestamp_observations: int = Field(default=0, ge=0)
+    invalid_timestamp_observations: int = Field(default=0, ge=0)
+    total_windows_generated: int = Field(default=0, ge=0)
+    valid_windows_count: int = Field(default=0, ge=0)
+    sparse_windows_count: int = Field(default=0, ge=0)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "invalid_timestamp_observations": self.invalid_timestamp_observations,
+            "missing_timestamp_observations": self.missing_timestamp_observations,
+            "sparse_windows_count": self.sparse_windows_count,
+            "total_observations": self.total_observations,
+            "total_windows_generated": self.total_windows_generated,
+            "valid_timestamp_observations": self.valid_timestamp_observations,
+            "valid_windows_count": self.valid_windows_count,
+        }
+
+
+class TemporalWindowDescriptor(BaseModel):
+    """Deterministic cryptographic identity descriptor for an individual temporal observation window."""
+    model_config = ConfigDict(frozen=True)
+
+    window_index: int = Field(..., ge=0)
+    window_id: str = Field(..., min_length=1, max_length=100)
+    start_time_utc: str = Field(..., min_length=20, max_length=40)
+    end_time_utc: str = Field(..., min_length=20, max_length=40)
+    sample_count: int = Field(..., ge=0)
+    is_valid: bool = Field(default=True)
+    window_hash: str = Field(..., min_length=64, max_length=64)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "end_time_utc": self.end_time_utc,
+            "is_valid": self.is_valid,
+            "sample_count": self.sample_count,
+            "start_time_utc": self.start_time_utc,
+            "window_id": self.window_id,
+            "window_index": self.window_index,
+        }
+
+
+class TemporalComparisonResult(BaseModel):
+    """Evaluation result for a pairwise temporal window comparison (Baseline-to-Window or Adjacent)."""
+    model_config = ConfigDict(frozen=True)
+
+    comparison_id: str = Field(..., min_length=1, max_length=100)
+    comparison_type: str = Field(..., description="'baseline_to_window' or 'adjacent_window'")
+    reference_window_index: int = Field(..., ge=0)
+    target_window_index: int = Field(..., ge=0)
+    reference_window_id: str = Field(..., min_length=1, max_length=100)
+    target_window_id: str = Field(..., min_length=1, max_length=100)
+    reference_sample_count: int = Field(..., ge=0)
+    target_sample_count: int = Field(..., ge=0)
+    statistical_analysis_hash: str = Field(default="", max_length=64)
+    statistic_method: str = Field(default="kernel_mmd", max_length=64)
+    statistic_value: float = Field(default=0.0)
+    raw_p_value: Optional[float] = None
+    adjusted_p_value: Optional[float] = None
+    effect_size: float = Field(default=0.0)
+    is_statistically_significant: bool = False
+    is_practically_significant: bool = False
+    status: ShiftDecisionState = ShiftDecisionState.NO_SHIFT_DETECTED
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "adjusted_p_value": self.adjusted_p_value if self.adjusted_p_value is not None else -1.0,
+            "comparison_id": self.comparison_id,
+            "comparison_type": self.comparison_type,
+            "effect_size": float(self.effect_size),
+            "is_practically_significant": self.is_practically_significant,
+            "is_statistically_significant": self.is_statistically_significant,
+            "raw_p_value": self.raw_p_value if self.raw_p_value is not None else -1.0,
+            "reference_sample_count": self.reference_sample_count,
+            "reference_window_id": self.reference_window_id,
+            "reference_window_index": self.reference_window_index,
+            "statistic_method": self.statistic_method,
+            "statistic_value": float(self.statistic_value),
+            "status": self.status.value,
+            "target_sample_count": self.target_sample_count,
+            "target_window_id": self.target_window_id,
+            "target_window_index": self.target_window_index,
+        }
+
+
+class ChangePointCandidate(BaseModel):
+    """Candidate distribution regime shift point identified along the temporal horizon."""
+    model_config = ConfigDict(frozen=True)
+
+    window_boundary_index: int = Field(..., ge=0)
+    candidate_timestamp_utc: str = Field(..., min_length=20, max_length=40)
+    adjacent_discrepancy: float = Field(..., ge=0.0)
+    permutation_p_value: Optional[float] = None
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    supporting_evidence: str = Field(..., min_length=1)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "adjacent_discrepancy": float(self.adjacent_discrepancy),
+            "candidate_timestamp_utc": self.candidate_timestamp_utc,
+            "confidence": float(self.confidence),
+            "permutation_p_value": self.permutation_p_value if self.permutation_p_value is not None else -1.0,
+            "supporting_evidence": self.supporting_evidence,
+            "window_boundary_index": self.window_boundary_index,
+        }
+
+
+class TemporalAnalysisProfile(BaseModel):
+    """Comprehensive temporal and windowed distribution-shift evaluation profile."""
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = Field(default="1.0", max_length=20)
+    analysis_version: str = Field(default="1.0", max_length=20)
+    comparison_boundary_hash: str = Field(..., min_length=64, max_length=64)
+    temporal_contract_hash: str = Field(..., min_length=64, max_length=64)
+    temporal_analysis_profile_hash: str = Field(..., min_length=64, max_length=64)
+    project_id: str = Field(..., min_length=1, max_length=64)
+    reference_dataset_id: str = Field(..., min_length=1, max_length=64)
+    target_dataset_id: str = Field(..., min_length=1, max_length=64)
+    global_trajectory_status: TemporalTrajectoryState
+    accounting: TemporalWindowAccounting
+    baseline_window: Optional[TemporalWindowDescriptor] = None
+    windows: List[TemporalWindowDescriptor] = Field(default_factory=list)
+    baseline_comparisons: List[TemporalComparisonResult] = Field(default_factory=list)
+    adjacent_comparisons: List[TemporalComparisonResult] = Field(default_factory=list)
+    change_points: List[ChangePointCandidate] = Field(default_factory=list)
+    earliest_timestamp_utc: Optional[str] = None
+    latest_timestamp_utc: Optional[str] = None
+    total_temporal_span_seconds: float = Field(default=0.0, ge=0.0)
+    warnings: List[str] = Field(default_factory=list)
+    limitations: List[str] = Field(default_factory=list)
+    findings: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_records: List[Dict[str, Any]] = Field(default_factory=list)
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """Convert to strictly sorted canonical dictionary for RFC 8785 JCS hashing."""
+        return {
+            "accounting": self.accounting.to_canonical_dict(),
+            "adjacent_comparisons_count": len(self.adjacent_comparisons),
+            "analysis_version": self.analysis_version,
+            "baseline_comparisons_count": len(self.baseline_comparisons),
+            "change_points_count": len(self.change_points),
+            "comparison_boundary_hash": self.comparison_boundary_hash,
+            "earliest_timestamp_utc": self.earliest_timestamp_utc or "",
+            "global_trajectory_status": self.global_trajectory_status.value,
+            "latest_timestamp_utc": self.latest_timestamp_utc or "",
+            "project_id": self.project_id,
+            "reference_dataset_id": self.reference_dataset_id,
+            "schema_version": self.schema_version,
+            "target_dataset_id": self.target_dataset_id,
+            "temporal_contract_hash": self.temporal_contract_hash,
+            "total_temporal_span_seconds": float(self.total_temporal_span_seconds),
+            "windows_count": len(self.windows),
+        }
+
 
 
 

@@ -1092,11 +1092,31 @@ Production computer vision and multi-contributor data curation pipelines frequen
 4. **Explicit, Immutable Reference Model:** Mandate explicit identification of baseline datasets/versions (`reference_dataset_version_id`) anchored by cryptographic content hashes (`dataset_hash`). Prohibit arbitrary or dynamic baseline selection.
 5. **Sample Size Floor & Deterministic Subsampling:** Enforce a strict minimum sample size floor ($N_{\text{min}} = 30$) below which the system transitions fail-closed to `INSUFFICIENT_DATA`. Deterministically subsample datasets exceeding $N_{\text{max}} = 5,000$ using PRNG seeds derived from dataset identity digests to guarantee $O(1)$ upper-bounded computational overhead.
 6. **Non-Attribution Principle:** Restrict distribution shift findings strictly to descriptive statistical divergences (`PRACTICAL_COVARIATE_SHIFT_DETECTED`, `LABEL_PROPORTION_SHIFT_DETECTED`). Prohibit automated accusations of malicious intent, poisoning, or contributor misconduct based solely on statistical drift.
-7. **Zero Database Schema Changes:** Persist all analysis results, statistical payloads, and test diagnostics within existing tables (`findings`, `evidence`, `provenance_records`, `audit_events`, `dataset_versions`) using structured JSON columns (`data_json`, `metadata_json`).
+#### ADR-100: Temporal and Windowed Distribution Shift Architecture
+
+**Status:** ACCEPTED (Phase 11.7)
+
+**Context:**
+Production AI dataset streams and continuous model operations encounter non-stationary data distributions over time due to seasonal cycles, sensor degradation, environment changes, and shifting user behaviors. An authoritative, deterministic, offline temporal assurance framework is required to partition time-ordered populations into structured observation windows ($\mathcal{W}_0, \mathcal{W}_1, \dots, \mathcal{W}_K$) and evaluate cumulative divergence (Baseline-to-Windows) and step transitions (Adjacent-Windows) without introducing duplicate statistical math or making unsupported accusations of malicious intent.
+
+**Decision:**
+1. **Event Time vs. Ingestion Time Semantics:** Designate `event_time` as the primary physical timestamp key, with `ingested_at` server-attested timestamps as an explicit fallback. Never mix event and ingestion time within the same evaluation contract.
+2. **Deterministic UTC Normalization & Ordering:** Normalize all temporal fields to ISO 8601 UTC microsecond strings (`YYYY-MM-DDTHH:MM:SS.ffffffZ`). Enforce multi-key deterministic sorting: Primary key `normalized_timestamp_utc ASC`, Secondary key `SHA-256(sample_content) ASC`.
+3. **Dual Window Comparison Topology:**
+   - *Baseline-to-Windows ($\mathcal{W}_0 \leftrightarrow \mathcal{W}_k$)*: Measures cumulative divergence from certified historical reference state.
+   - *Adjacent-Windows ($\mathcal{W}_{k-1} \leftrightarrow \mathcal{W}_k$)*: Detects local step acceleration and regime shifts between consecutive operational periods.
+4. **Statistical Engine Authority Reuse:** Re-use Phase 11.3 `StatisticalDriftEngine` directly for all univariate, categorical, and multivariate two-sample hypothesis tests (KS, Chi-Square, Kernel MMD, Energy Distance, Permutation Tests with $B=100$). Zero duplicate statistical algorithms.
+5. **Multi-Tier Multiple Testing Control:** Apply Benjamini–Hochberg FDR ($q^* = 0.05$) within each window across feature sets, and across the sequence of $K$ baseline window tests to prevent false discovery inflation.
+6. **Nonparametric Change-Point Candidate Detection:** Identify candidate regime shift boundaries $\hat{\tau}_c$ where adjacent discrepancy achieves a local maximum subject to $p_{\text{adj}} \le 0.05$ and effect size thresholds. Change points represent statistical regime transitions, NOT confirmed attack timestamps.
+7. **Persistence Classification:** Classify temporal trajectories into deterministic states: `NO_MATERIAL_SHIFT`, `TRANSIENT_SHIFT` (single-window excursion), `PERSISTENT_SHIFT` ($\ge 2$ consecutive shifted windows), `GRADUAL_DRIFT` (monotonic increase across $\ge 3$ windows), and `ABRUPT_SHIFT` (acute step jump $> 3\times$ threshold).
+8. **Resource Ceiling & Sampling Floor:** Enforce minimum window sample size $N_{\min} = 30$, maximum window count $K \le 50$, and maximum per-window sample budget $N_w \le 5000$.
+9. **Non-Attribution Invariant:** Restrict findings and evidence strictly to descriptive detection observations (`finding_type="temporal_distribution_shift"`, `evidence_layer="detection"`). Temporal shift indicates non-stationarity and does NOT prove malicious tampering, dataset poisoning, or model backdoor compromise.
+10. **Zero Database Schema Changes:** Store all temporal profiles, change-point candidate records, and sample accounting metadata in existing `findings`, `evidence`, and `provenance_records` tables with 0 new migrations.
 
 ---
 
 *End of Architectural Decision Records*
+
 
 
 

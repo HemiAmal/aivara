@@ -107,3 +107,35 @@ class FeatureDriftCategory(str, Enum):
     LATENT_EMBEDDING = "latent_embedding"
 
 
+class TemporalWindowStrategy(str, Enum):
+    """Partitioning strategy for chronological observations."""
+    FIXED_INTERVAL = "fixed_interval"
+    SLIDING_WINDOW = "sliding_window"
+
+
+class TemporalComparisonTopology(str, Enum):
+    """Evaluation topology for sequential temporal windows."""
+    BASELINE_TO_WINDOWS = "baseline_to_windows"
+    ADJACENT_WINDOWS = "adjacent_windows"
+    DUAL_TOPOLOGY = "dual_topology"
+
+
+class TemporalTrajectoryState(str, Enum):
+    """Trajectory classification of temporal distribution shift."""
+    NO_MATERIAL_SHIFT = "no_material_shift"
+    TRANSIENT_SHIFT = "transient_shift"
+    PERSISTENT_SHIFT = "persistent_shift"
+    GRADUAL_DRIFT = "gradual_drift"
+    ABRUPT_SHIFT = "abrupt_shift"
+    INSUFFICIENT_DATA = "insufficient_data"
+    INSUFFICIENT_TEMPORAL_COVERAGE = "insufficient_temporal_coverage"
+    INVALID = "invalid"
+
+
+class TimestampSource(str, Enum):
+    """Authoritative source field for temporal indexing."""
+    EVENT_TIME = "event_time"
+    INGESTION_TIME = "ingestion_time"
+
+
+
