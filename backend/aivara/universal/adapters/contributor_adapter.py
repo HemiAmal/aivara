@@ -61,15 +61,7 @@ class ContributorRiskEvidenceAdapter(BaseEvidenceAdapter):
         asset_id = str(contrib_id)
 
         # 5. Ancestry extraction
-        anc_dict = raw.get("ancestry_keys") or {}
-        ds_ver_id = raw.get("dataset_version_id") or anc_dict.get("dataset_version_id") or ctx.get("dataset_version_id")
-        
-        ancestry = AncestryPath(
-            source_id=str(contrib_id),
-            dataset_version_id=str(ds_ver_id) if ds_ver_id else None,
-            extra_keys={k: str(v) for k, v in anc_dict.items() if k not in ("source_id", "dataset_version_id")},
-        )
-        anc_status = AncestryStatus.VERIFIED if not ancestry.is_empty() else AncestryStatus.UNVERIFIED
+        ancestry, anc_status = self._extract_ancestry_path(raw, ctx)
 
         # 6. Payloads & Hashes
         data_json = raw.get("data_json") or raw.get("metrics") or {k: v for k, v in raw.items() if k not in ("id", "evidence_id", "project_id", "source_payload_hash", "artifact_hash")}

@@ -62,18 +62,7 @@ class DatasetIntegrityEvidenceAdapter(BaseEvidenceAdapter):
         asset_id = str(raw.get("target_asset_id") or raw.get("affected_asset_id") or raw.get("dataset_id") or ctx.get("dataset_id") or "unknown_dataset")
 
         # 5. Ancestry extraction
-        anc_dict = raw.get("ancestry_keys") or {}
-        sample_id = raw.get("sample_id") or anc_dict.get("sample_id") or ctx.get("sample_id")
-        ds_ver_id = raw.get("dataset_version_id") or anc_dict.get("dataset_version_id") or ctx.get("dataset_version_id")
-        src_id = raw.get("source_id") or raw.get("contributor_id") or anc_dict.get("source_id")
-        
-        ancestry = AncestryPath(
-            sample_id=str(sample_id) if sample_id else None,
-            dataset_version_id=str(ds_ver_id) if ds_ver_id else None,
-            source_id=str(src_id) if src_id else None,
-            extra_keys={k: str(v) for k, v in anc_dict.items() if k not in ("sample_id", "dataset_version_id", "source_id")},
-        )
-        anc_status = AncestryStatus.VERIFIED if not ancestry.is_empty() else AncestryStatus.UNVERIFIED
+        ancestry, anc_status = self._extract_ancestry_path(raw, ctx)
 
         # 6. Payloads & Hashes
         data_json = raw.get("data_json") or raw.get("data") or raw.get("metrics") or {k: v for k, v in raw.items() if k not in ("id", "evidence_id", "project_id", "source_payload_hash", "artifact_hash")}

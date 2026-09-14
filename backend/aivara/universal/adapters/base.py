@@ -188,3 +188,67 @@ class BaseEvidenceAdapter(abc.ABC):
 
         return sorted(prov_ids), sorted(prov_hashes)
 
+    def _extract_ancestry_path(
+        self,
+        raw: Dict[str, Any],
+        ctx: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[AncestryPath, AncestryStatus]:
+        """Extract standardized AncestryPath vector across canonical coordinates."""
+        c = ctx or {}
+        anc_dict = raw.get("ancestry_keys") or {}
+
+        sample_id = (
+            raw.get("sample_id")
+            or raw.get("input_hash")
+            or anc_dict.get("sample_id")
+            or c.get("sample_id")
+        )
+        dataset_version_id = (
+            raw.get("dataset_version_id")
+            or raw.get("reference_dataset_version_id")
+            or anc_dict.get("dataset_version_id")
+            or c.get("dataset_version_id")
+        )
+        model_fingerprint = (
+            raw.get("model_fingerprint")
+            or raw.get("fingerprint_value")
+            or raw.get("file_hash_sha256")
+            or raw.get("model_hash")
+            or anc_dict.get("model_fingerprint")
+            or c.get("model_fingerprint")
+        )
+        window_id = (
+            raw.get("window_id")
+            or raw.get("baseline_run_id")
+            or anc_dict.get("window_id")
+            or c.get("window_id")
+            or c.get("baseline_run_id")
+        )
+        source_id = (
+            raw.get("source_id")
+            or raw.get("contributor_id")
+            or raw.get("source_group_id")
+            or anc_dict.get("source_id")
+            or c.get("source_id")
+        )
+
+        canonical_keys = {"sample_id", "dataset_version_id", "model_fingerprint", "window_id", "source_id"}
+        extra_keys = {
+            str(k): str(v)
+            for k, v in anc_dict.items()
+            if k not in canonical_keys and v is not None
+        }
+
+        ancestry = AncestryPath(
+            sample_id=str(sample_id) if sample_id else None,
+            dataset_version_id=str(dataset_version_id) if dataset_version_id else None,
+            model_fingerprint=str(model_fingerprint) if model_fingerprint else None,
+            window_id=str(window_id) if window_id else None,
+            source_id=str(source_id) if source_id else None,
+            extra_keys=extra_keys,
+        )
+
+        anc_status = AncestryStatus.VERIFIED if not ancestry.is_empty() else AncestryStatus.UNVERIFIED
+        return ancestry, anc_status
+
+

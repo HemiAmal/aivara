@@ -61,20 +61,7 @@ class DistributionShiftEvidenceAdapter(BaseEvidenceAdapter):
         asset_id = str(raw.get("target_asset_id") or raw.get("dataset_version_id") or raw.get("affected_asset_id") or ctx.get("target_asset_id") or "unknown_asset")
 
         # 5. Ancestry extraction
-        anc_dict = raw.get("ancestry_keys") or {}
-        ds_ver_id = raw.get("dataset_version_id") or raw.get("reference_dataset_version_id") or anc_dict.get("dataset_version_id") or ctx.get("dataset_version_id")
-        model_fp = raw.get("model_fingerprint") or raw.get("model_hash") or anc_dict.get("model_fingerprint") or ctx.get("model_fingerprint")
-        window_id = raw.get("window_id") or anc_dict.get("window_id")
-        src_id = raw.get("source_group_id") or raw.get("source_id") or anc_dict.get("source_id")
-        
-        ancestry = AncestryPath(
-            dataset_version_id=str(ds_ver_id) if ds_ver_id else None,
-            model_fingerprint=str(model_fp) if model_fp else None,
-            window_id=str(window_id) if window_id else None,
-            source_id=str(src_id) if src_id else None,
-            extra_keys={k: str(v) for k, v in anc_dict.items() if k not in ("dataset_version_id", "model_fingerprint", "window_id", "source_id")},
-        )
-        anc_status = AncestryStatus.VERIFIED if not ancestry.is_empty() else AncestryStatus.UNVERIFIED
+        ancestry, anc_status = self._extract_ancestry_path(raw, ctx)
 
         # 6. Payloads & Hashes
         data_json = raw.get("data_json") or raw.get("metrics") or {k: v for k, v in raw.items() if k not in ("id", "evidence_id", "project_id", "source_payload_hash", "evidence_hash", "artifact_hash")}

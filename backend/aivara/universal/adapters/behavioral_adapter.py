@@ -60,16 +60,7 @@ class BehavioralAnalysisEvidenceAdapter(BaseEvidenceAdapter):
         asset_id = str(model_id)
 
         # 5. Ancestry extraction
-        anc_dict = raw.get("ancestry_keys") or {}
-        model_fp = raw.get("model_fingerprint") or anc_dict.get("model_fingerprint") or ctx.get("model_fingerprint")
-        run_id = raw.get("baseline_run_id") or raw.get("window_id") or anc_dict.get("window_id") or ctx.get("baseline_run_id")
-        
-        ancestry = AncestryPath(
-            model_fingerprint=str(model_fp) if model_fp else None,
-            window_id=str(run_id) if run_id else None,
-            extra_keys={k: str(v) for k, v in anc_dict.items() if k not in ("model_fingerprint", "window_id")},
-        )
-        anc_status = AncestryStatus.VERIFIED if not ancestry.is_empty() else AncestryStatus.UNVERIFIED
+        ancestry, anc_status = self._extract_ancestry_path(raw, ctx)
 
         # 6. Payloads & Hashes
         data_json = raw.get("data_json") or raw.get("stability_metrics") or {k: v for k, v in raw.items() if k not in ("id", "evidence_id", "project_id", "source_payload_hash", "artifact_hash")}

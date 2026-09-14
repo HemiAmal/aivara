@@ -61,14 +61,7 @@ class ModelIntegrityEvidenceAdapter(BaseEvidenceAdapter):
         asset_id = str(model_id)
 
         # 5. Ancestry extraction
-        anc_dict = raw.get("ancestry_keys") or {}
-        model_fp = raw.get("model_fingerprint") or raw.get("fingerprint_value") or raw.get("file_hash_sha256") or anc_dict.get("model_fingerprint") or ctx.get("model_fingerprint")
-        
-        ancestry = AncestryPath(
-            model_fingerprint=str(model_fp) if model_fp else None,
-            extra_keys={k: str(v) for k, v in anc_dict.items() if k != "model_fingerprint"},
-        )
-        anc_status = AncestryStatus.VERIFIED if not ancestry.is_empty() else AncestryStatus.UNVERIFIED
+        ancestry, anc_status = self._extract_ancestry_path(raw, ctx)
 
         # 6. Payloads & Hashes
         data_json = raw.get("data_json") or raw.get("payload") or {k: v for k, v in raw.items() if k not in ("id", "evidence_id", "project_id", "source_payload_hash", "artifact_hash")}
