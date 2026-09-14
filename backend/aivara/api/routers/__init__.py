@@ -23,6 +23,7 @@ from aivara.api.routers import (
     drift,
 )
 from aivara.universal.api import universal_router
+from aivara.universal.audit import audit_router
 
 api_v1_router = APIRouter(prefix="/api/v1")
 
@@ -46,4 +47,6 @@ api_v1_router.include_router(reports.router)
 api_v1_router.include_router(attack_lab.router)
 api_v1_router.include_router(drift.router)
 api_v1_router.include_router(universal_router)
+api_v1_router.include_router(audit_router)
+
 
