@@ -1,65 +1,64 @@
-# PHASE 12.4 — HIERARCHICAL MULTI-ASSET RISK AGGREGATION ENGINE ARCHITECTURE
+# Phase 12.4 — Cross-Subsystem Evidence Ingestion Architecture
 
-## 1. Executive Summary
-
-Phase 12.4 establishes the authoritative **Hierarchical Multi-Asset Risk Aggregation Engine** for the AIVARA verification workstation.
-
-Consuming the immutable, cycle-free `UniversalEvidenceGraph` from Phase 12.3 and the canonical `UniversalEvidenceEnvelope` contracts from Phase 12.2, Phase 12.4 calculates closed-form, sub-additive, bounded operational risk across a 3-tier hierarchy:
-1. **Tier 1 (Asset Level $R(A)$)**: Modality clustering with intra-cluster damping ($\lambda_{\text{intra}} = 0.15$) and asymptotic saturation.
-2. **Tier 2 (Lineage Chain Risk $R_{\text{chain}}$)**: Pairwise compounding along explicit DAG dependency edges ($\gamma_{\text{prop}} = 0.25$).
-3. **Tier 3 (Project Operational Risk $R_{\text{project}}$)**: Dominance-preserving multi-asset synthesis ($\alpha_{\text{peak}} = 1.0, \lambda_{\text{inter}} = 0.10$).
+**Status:** Authoritative Design Specification  
+**Authority:** Phase 12.1 Universal Risk Architecture Freeze  
+**Upstream Dependencies:** Phase 12.2 Normalization, Phase 12.3 Evidence Graph  
+**Downstream Phases:** Phase 12.5 Correlation & Dependency Modeling  
 
 ---
 
-## 2. Mathematical Formulations
+## 1. Architectural Mission
 
-### Tier 1: Asset-Level Operational Risk ($R(A)$)
-For each target asset $A$:
-1. Group evidence and findings into ancestry clusters: $\mathcal{C}_1, \dots, \mathcal{C}_K$.
-2. Compute intra-cluster damped score:
-   $$S(\mathcal{C}_k) = \min\left(1.0, \max_{e \in \mathcal{C}_k}(w_e \cdot c_e \cdot s_e) + \lambda_{\text{intra}} \sum_{e \in \mathcal{C}_k \setminus \{e^*\}} w_e \cdot c_e \cdot s_e\right)$$
-3. Compute asset risk via sub-additive bounded composition:
-   $$R(A) = 1.0 - \prod_{k=1}^K (1.0 - S(\mathcal{C}_k)) \in [0.0, 1.0]$$
-
-### Tier 2: Cross-Asset Lineage Chain Risk ($R_{\text{chain}}$)
-For an explicit DAG lineage edge $A_1 \to A_2$:
-$$R_{\text{chain}}(A_1 \to A_2) = \gamma_{\text{prop}} \cdot R(A_1) \cdot R(A_2) \in [0.0, 1.0]$$
-
-### Tier 3: Project Operational Risk ($R_{\text{project}}$)
-Synthesizes all individual asset risks $\{R(A) : A \in \mathcal{A}\}$:
-$$R_{\text{project}} = 1.0 - (1.0 - \max_{A \in \mathcal{A}} R(A))^{\alpha_{\text{peak}}} \cdot \prod_{A \in \mathcal{A}} (1.0 - \lambda_{\text{inter}} R(A)) \in [0.0, 1.0]$$
-
----
-
-## 3. Analytical Uncertainty & Data Quality State
-
-Missing or ambiguous ancestry is treated purely as an **analytical data-quality state**:
-- Tracked via `EvidenceSufficiencyStatus` (`SUFFICIENT`, `INSUFFICIENT_ANCESTRY`, `UNVERIFIED`).
-- Preserves mathematical risk calculation without fabrications or synthetic heuristics.
-- **Phase 12.4 does NOT perform decision routing or assign policy dispositions** (e.g., no routing to `REVIEW`, `ACCEPT`, `QUARANTINE`, or `REJECT`).
-- Phase 12.8 is the sole authoritative owner of policy disposition mapping and dossier decision sealing.
-
----
-
-## 4. Component Architecture & Package Layout
+Phase 12.4 establishes the controlled, isolated, deterministic ingestion boundary between the seven upstream assurance subsystems (Phases 5–11) and the Universal Evidence Architecture (Phase 12.2 Normalization and Phase 12.3 Graph).
 
 ```
-backend/aivara/universal/risk/
-├── enums.py         # RiskLevel, AggregationStage, EvidenceSufficiencyStatus, AggregationSchemaVersion
-├── exceptions.py    # NonFiniteRiskError, RiskOutOfRangeError, InvalidPolicyConfigurationError
-├── config.py        # ImmutableAggregationConfig with JCS canonical hashing
-├── schemas.py       # RiskContribution, AssetRiskAssessment, ChainRiskAssessment, ProjectRiskAssessment, HierarchicalRiskAssessment
-├── aggregator.py    # HierarchicalRiskAggregator (Closed-form math engine)
-└── __init__.py      # Package export interface
+Phase 5  (Dataset Integrity)       ──┐
+Phase 6  (Contributor Risk)        ──┤
+Phase 7  (Model Integrity)          ──┤
+Phase 8  (Behavioral Analysis)     ──┼──> [Phase 12.4 Ingestion Service & Handlers]
+Phase 9  (Backdoor Trigger)        ──┤             │
+Phase 10 (Inference Integrity)     ──┤             ▼ (Normalization + Validation)
+Phase 11 (Distribution Shift)      ──┘     [Phase 12.3 Universal Evidence Graph]
 ```
 
 ---
 
-## 5. Subsystem Boundary Rules
+## 2. Hard Architectural Invariants
 
-- **Phase 12.4 calculates risk. Phase 12.4 does not make decisions.**
-- **Strict Boundary Separation**:
-  - No cross-subsystem correlation matrix damping ($\mathbf{C}_{7 \times 7}$ belongs to Phase 12.5).
-  - No proof-layer rejection overrides / non-compensable REJECT (belongs to Phase 12.6).
-  - No global mutable policy registry (belongs to Phase 12.7).
-  - No disposition decision mapping / dossier sealing (belongs to Phase 12.8).
+1. **Zero Risk Computation:** Phase 12.4 does NOT calculate universal, asset, chain, or project risk (owned by Phase 12.6/12.9).
+2. **Zero Correlation Damping:** Phase 12.4 does NOT apply 7×7 cross-subsystem correlation matrices or damping parameters (owned by Phase 12.5).
+3. **Zero Policy Decisions:** Phase 12.4 NEVER outputs `ACCEPT`, `REVIEW`, `QUARANTINE`, or `REJECT` disposition decisions (owned by Phase 12.7).
+4. **Zero Proof Overrides:** Phase 12.4 preserves detection vs. proof confidence without synthetic promotion or attenuation.
+5. **Project Boundary Isolation:** Items cannot cross tenant boundaries ($E_{\text{project}} = \text{Target}_{\text{project}}$).
+6. **Strict Idempotency:** Ingesting an identical evidence payload multiple times yields `DUPLICATE_SKIPPED` without mutating existing state or graph structures.
+7. **Resource Bounds Governance:** Hard bounds ($E_{\max} = 5,000$, $F_{\max} = 1,000$, $A_{\max} = 250$, $\Delta_{\max} = 5$, $\beta_{\max} = 100$).
+
+---
+
+## 3. Ingestion Pipeline Stages
+
+Every evidence record passes through a strict 9-stage pipeline:
+
+1. **Format Validation:** Verified against `UpstreamEvidenceItem` schema with finite numerical bounds.
+2. **Project Boundary Check:** Cross-tenant rejection before any parsing.
+3. **Domain Verification:** Canonical mapping to one of the 7 upstream subsystems.
+4. **Source Payload Verification:** Cryptographic SHA-256 match against supplied payload digest.
+5. **Domain Transformation Hook:** Handled via domain-specific `BaseDomainIngestionHandler`.
+6. **Phase 12.2 Normalization:** Routed through `UniversalEvidenceNormalizer` into `UniversalEvidenceEnvelope`.
+7. **Ancestry & Cycle Defense:** Self-loops and cycles rejected.
+8. **Deduplication:** Hash-based deduplication against seen envelopes.
+9. **Graph Binding:** Non-duplicate items bound to `UniversalEvidenceGraphBuilder` with N:M finding edges.
+
+---
+
+## 4. Canonical Subsystem Domains
+
+| Index | Canonical Domain | Upstream Subsystem | Ingestion Handler |
+|---|---|---|---|
+| 0 | `DATASET_INTEGRITY` | Phase 5 | `DatasetIngestionHandler` |
+| 1 | `CONTRIBUTOR_RISK` | Phase 6 | `ContributorIngestionHandler` |
+| 2 | `MODEL_INTEGRITY` | Phase 7 | `ModelIngestionHandler` |
+| 3 | `BEHAVIORAL_ANALYSIS` | Phase 8 | `BehavioralIngestionHandler` |
+| 4 | `BACKDOOR_TRIGGER` | Phase 9 | `BackdoorIngestionHandler` |
+| 5 | `INFERENCE_INTEGRITY` | Phase 10 | `InferenceIngestionHandler` |
+| 6 | `DISTRIBUTION_SHIFT` | Phase 11 | `DistributionIngestionHandler` |

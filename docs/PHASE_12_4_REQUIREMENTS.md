@@ -1,24 +1,28 @@
-# PHASE 12.4 — HIERARCHICAL MULTI-ASSET RISK AGGREGATION REQUIREMENTS
+# Phase 12.4 — Requirements Specification
 
-## 1. Functional Requirements
-
-- **REQ-12.4-01: Asset-Level Risk Aggregation**: The engine MUST calculate bounded operational risk $R(A) \in [0.0, 1.0]$ for each target asset using ancestry-aware clustering and sub-additive saturation.
-- **REQ-12.4-02: Intra-Cluster Damping**: Evidence sharing primary ancestry coordinates MUST be collapsed into a single modality cluster with intra-cluster damping $\lambda_{\text{intra}} = 0.15$.
-- **REQ-12.4-03: Lineage Chain Compounding**: The engine MUST calculate pairwise chain risk $R_{\text{chain}} = \gamma_{\text{prop}} \cdot R(A_1) \cdot R(A_2)$ for all explicit DAG lineage edges ($A_1 \to A_2$).
-- **REQ-12.4-04: Project Operational Risk Synthesis**: The engine MUST calculate project risk $R_{\text{project}} = 1.0 - (1.0 - \max_A R(A))^{\alpha_{\text{peak}}} \cdot \prod_A (1.0 - \lambda_{\text{inter}} R(A))$ preserving peak asset dominance.
-- **REQ-12.4-05: Explainable Risk Contribution Tracing**: The engine MUST generate deterministic `RiskContribution` records for all active risk drivers.
-- **REQ-12.4-06: Cryptographic Content Addressing**: Outputs MUST derive deterministic RFC 8785 JCS + SHA-256 digests (`assessment_hash`, `chain_hash`, `hierarchical_hash`).
-- **REQ-12.4-07: Monotonicity Invariant**: Adding positive risk evidence MUST NOT decrease risk; removing positive risk evidence MUST NOT increase risk.
-- **REQ-12.4-08: Idempotence Invariant**: Repeated evaluations on identical graph and configuration inputs MUST yield bit-exact identical risk scores and cryptographic hashes.
-- **REQ-12.4-15: Analytical Sufficiency Tracking**: Missing or unresolvable ancestry MUST be recorded as an analytical data-quality state (`EvidenceSufficiencyStatus.INSUFFICIENT_ANCESTRY`) without routing to decisions or assigning dispositions.
+**Phase:** Phase 12.4 Cross-Subsystem Evidence Ingestion  
+**Status:** Requirements Baseline  
 
 ---
 
-## 2. Non-Functional & Governance Requirements
+## 1. Functional Requirements
 
-- **REQ-12.4-09: Numerical Stability & Bounded Scalars**: All risk calculations MUST produce finite floats strictly within $[0.0, 1.0]$. Non-finite values (`NaN`, `+Inf`, `-Inf`) MUST fail closed.
-- **REQ-12.4-10: Immutable Contracts**: All assessment models (`RiskContribution`, `AssetRiskAssessment`, `ChainRiskAssessment`, `ProjectRiskAssessment`, `HierarchicalRiskAssessment`) MUST be immutable Pydantic V2 models.
-- **REQ-12.4-11: 100% Offline Air-Gapped Operation**: Aggregation operations MUST execute 100% offline with zero network sockets or external services.
-- **REQ-12.4-12: Zero Phase 0–11 Modifications**: Phase 0 through Phase 11 production code and database schemas MUST remain strictly unmodified.
-- **REQ-12.4-13: Prohibition of Correlation Damping Matrix**: Phase 12.4 MUST NOT implement the $7 \times 7$ inter-domain correlation matrix (deferred to Phase 12.5).
-- **REQ-12.4-14: Prohibition of Decisions & Dispositions**: Phase 12.4 MUST NOT make policy decisions, route to `REVIEW`, or assign dispositions (`ACCEPT`, `REVIEW`, `QUARANTINE`, `REJECT`). Decision mapping belongs exclusively to Phase 12.8.
+- **REQ-12.4-01 (Domain Coverage):** Ingestion pipeline must support all 7 canonical assurance domains: `DATASET_INTEGRITY`, `CONTRIBUTOR_RISK`, `MODEL_INTEGRITY`, `BEHAVIORAL_ANALYSIS`, `BACKDOOR_TRIGGER`, `INFERENCE_INTEGRITY`, and `DISTRIBUTION_SHIFT`.
+- **REQ-12.4-02 (Boundary Isolation):** The ingestion service must reject any evidence item whose `project_id` does not match the active project context (`ProjectBoundaryIngestionError`).
+- **REQ-12.4-03 (Payload Integrity):** When supplied, `source_payload_hash` must match the SHA-256 digest of canonical RFC 8785 JCS bytes of the raw payload (`SourceHashMismatchIngestionError`).
+- **REQ-12.4-04 (Normalization Integration):** All accepted evidence must be normalized into `UniversalEvidenceEnvelope` via Phase 12.2 normalizer.
+- **REQ-12.4-05 (Graph Integration):** Non-duplicate envelopes and N:M finding relationships must be bound to `UniversalEvidenceGraphBuilder` (Phase 12.3).
+- **REQ-12.4-06 (Idempotency):** Ingesting identical items must result in `DUPLICATE_SKIPPED` status without error or mutation of existing graph state.
+- **REQ-12.4-07 (Ancestry Preservation):** Ancestry self-loops ($E \in \text{parents}(E)$) must be rejected (`AncestryConflictIngestionError`). Missing ancestry must be marked `UNVERIFIED` without fabricating synthetic parent nodes.
+- **REQ-12.4-08 (Confidence Invariants):** Proof-layer evidence confidence must be strictly $1.0$. Detection-layer evidence confidence must be preserved within $[0.0, 1.0]$.
+- **REQ-12.4-09 (Resource Ceilings):** Hard resource limits ($E \le 5,000$, $F \le 1,000$, $A \le 250$) must be enforced during single and batch ingestion (`IngestionResourceLimitError`).
+- **REQ-12.4-10 (Deterministic Ingestion Report):** Batch execution must generate an immutable `IngestionReport` with canonical SHA-256 `ingestion_report_hash`.
+
+---
+
+## 2. Non-Functional & Security Requirements
+
+- **SEC-12.4-01 (100% Offline Air-Gap):** Zero network sockets, zero external API calls, zero cloud dependencies.
+- **SEC-12.4-02 (Immutability):** All Pydantic data contracts must be frozen (`ConfigDict(frozen=True)`).
+- **SEC-12.4-03 (Non-Breaking Integration):** Zero modifications to frozen Phase 0–11 and Phase 12.1–12.3 code.
+- **SEC-12.4-04 (Boundary Segregation):** Zero risk calculation math, zero correlation damping, and zero policy decisions within Phase 12.4.

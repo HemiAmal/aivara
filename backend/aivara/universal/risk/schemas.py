@@ -1,4 +1,4 @@
-"""Pydantic V2 immutable schemas and contracts for Hierarchical Risk Aggregation (Phase 12.4)."""
+"""Pydantic V2 immutable schemas and contracts for Universal Risk Computation (Phase 12.6) and Hierarchical Aggregation (Phase 12.9)."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ class RiskContribution(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     contribution_id: str = Field(..., min_length=1, max_length=128)
-    stage: AggregationStage
+    stage: AggregationStage = Field(default=AggregationStage.EVIDENCE_CLUSTER)
     source_id: str = Field(..., min_length=1, max_length=128)
     target_id: str = Field(..., min_length=1, max_length=128)
     domain: Optional[SubsystemDomain] = None
@@ -66,7 +66,7 @@ class RiskContribution(BaseModel):
             raise NonFiniteRiskError(f"Contribution score '{info.field_name}' must be finite, got {v}")
         if v < 0.0 or v > 1.0:
             raise RiskOutOfRangeError(f"Contribution score '{info.field_name}' must be in [0.0, 1.0], got {v}")
-        return float(v)
+        return round(float(v), 6)
 
     @field_validator("metadata")
     @classmethod
@@ -99,6 +99,63 @@ class RiskContribution(BaseModel):
         }
 
 
+class UniversalRiskAssessment(BaseModel):
+    """Authoritative Phase 12.6 immutable asset-level / universal risk quantification."""
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = Field(default=AggregationSchemaVersion.V1_0.value)
+    risk_policy_version: str = Field(default="1.0.0")
+    project_id: str = Field(..., min_length=1, max_length=128)
+    asset_id: str = Field(..., min_length=1, max_length=128)
+    asset_type: str = Field(default="asset", min_length=1, max_length=64)
+    risk_score: float = Field(..., ge=0.0, le=1.0)
+    risk_level: RiskLevel
+    evidence_sufficiency: EvidenceSufficiencyStatus = Field(default=EvidenceSufficiencyStatus.SUFFICIENT)
+    finding_count: int = Field(default=0, ge=0)
+    evidence_count: int = Field(default=0, ge=0)
+    cluster_count: int = Field(default=0, ge=0)
+    correlation_hash: Optional[str] = Field(default=None, max_length=64)
+    graph_merkle_root: Optional[str] = Field(default=None, max_length=64)
+    contributions: List[RiskContribution] = Field(default_factory=list)
+    risk_hash: str = Field(default="", max_length=64)
+    created_at_utc: str = Field(default_factory=utcnow_iso)
+
+    @field_validator("risk_score")
+    @classmethod
+    def validate_risk(cls, v: float) -> float:
+        if math.isnan(v) or math.isinf(v):
+            raise NonFiniteRiskError(f"Risk score must be a finite float, got {v}")
+        if v < 0.0 or v > 1.0:
+            raise RiskOutOfRangeError(f"Risk score must be in [0.0, 1.0], got {v}")
+        return round(float(v), 6)
+
+    @model_validator(mode="after")
+    def compute_risk_hash(self) -> UniversalRiskAssessment:
+        if not self.risk_hash:
+            canonical_dict = self.to_canonical_dict()
+            computed = compute_sha256_digest(compute_canonical_jcs_bytes(canonical_dict))
+            object.__setattr__(self, "risk_hash", computed)
+        return self
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        return {
+            "asset_id": self.asset_id,
+            "asset_type": self.asset_type,
+            "cluster_count": self.cluster_count,
+            "contribution_hashes": [c.contribution_hash for c in sorted(self.contributions, key=lambda x: x.contribution_id)],
+            "correlation_hash": self.correlation_hash,
+            "evidence_count": self.evidence_count,
+            "evidence_sufficiency": self.evidence_sufficiency.value,
+            "finding_count": self.finding_count,
+            "graph_merkle_root": self.graph_merkle_root,
+            "project_id": self.project_id,
+            "risk_level": self.risk_level.value,
+            "risk_policy_version": self.risk_policy_version,
+            "risk_score": float(self.risk_score),
+            "schema_version": self.schema_version,
+        }
+
+
 class AssetRiskAssessment(BaseModel):
     """Immutable Tier-1 risk quantification for a specific asset A."""
     model_config = ConfigDict(frozen=True)
@@ -122,7 +179,7 @@ class AssetRiskAssessment(BaseModel):
             raise NonFiniteRiskError(f"Asset risk score must be a finite float, got {v}")
         if v < 0.0 or v > 1.0:
             raise RiskOutOfRangeError(f"Asset risk score must be in [0.0, 1.0], got {v}")
-        return float(v)
+        return round(float(v), 6)
 
     @model_validator(mode="after")
     def compute_assessment_hash(self) -> AssetRiskAssessment:
@@ -148,7 +205,7 @@ class AssetRiskAssessment(BaseModel):
 
 
 class ChainRiskAssessment(BaseModel):
-    """Immutable Tier-2 compounding lineage risk between two linked assets."""
+    """Immutable Tier-2 compounding lineage risk between two linked assets (Authoritative Phase 12.9)."""
     model_config = ConfigDict(frozen=True)
 
     project_id: str = Field(..., min_length=1, max_length=128)
@@ -167,7 +224,7 @@ class ChainRiskAssessment(BaseModel):
             raise NonFiniteRiskError(f"Chain score '{info.field_name}' must be finite, got {v}")
         if v < 0.0 or v > 1.0:
             raise RiskOutOfRangeError(f"Chain score '{info.field_name}' must be in [0.0, 1.0], got {v}")
-        return float(v)
+        return round(float(v), 6)
 
     @model_validator(mode="after")
     def compute_chain_hash(self) -> ChainRiskAssessment:
@@ -190,7 +247,7 @@ class ChainRiskAssessment(BaseModel):
 
 
 class ProjectRiskAssessment(BaseModel):
-    """Immutable Tier-3 overall project operational risk evaluation."""
+    """Immutable Tier-3 overall project operational risk evaluation (Authoritative Phase 12.9)."""
     model_config = ConfigDict(frozen=True)
 
     project_id: str = Field(..., min_length=1, max_length=128)
@@ -209,7 +266,7 @@ class ProjectRiskAssessment(BaseModel):
             raise NonFiniteRiskError(f"Project score '{info.field_name}' must be finite, got {v}")
         if v < 0.0 or v > 1.0:
             raise RiskOutOfRangeError(f"Project score '{info.field_name}' must be in [0.0, 1.0], got {v}")
-        return float(v)
+        return round(float(v), 6)
 
     @model_validator(mode="after")
     def compute_assessment_hash(self) -> ProjectRiskAssessment:
@@ -232,7 +289,7 @@ class ProjectRiskAssessment(BaseModel):
 
 
 class HierarchicalRiskAssessment(BaseModel):
-    """Immutable complete hierarchical multi-asset risk synthesis result."""
+    """Immutable complete hierarchical multi-asset risk synthesis result (Authoritative Phase 12.9)."""
     model_config = ConfigDict(frozen=True)
 
     schema_version: str = Field(default=AggregationSchemaVersion.V1_0.value)

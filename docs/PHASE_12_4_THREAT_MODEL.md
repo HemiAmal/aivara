@@ -1,16 +1,18 @@
-# PHASE 12.4 — HIERARCHICAL MULTI-ASSET RISK AGGREGATION THREAT MODEL
+# Phase 12.4 — Threat Model & Security Analysis
 
-## 1. Threat Identification & Mitigation Matrix
+**Phase:** Phase 12.4 Cross-Subsystem Evidence Ingestion  
+**Status:** Complete Threat Assessment  
 
-| Threat ID | Threat Vector | Impact | Mitigation in Phase 12.4 |
-| :--- | :--- | :--- | :--- |
-| **THREAT-12.4-01** | Risk Score Inflation | False alarm / denial of service. | Sub-additive saturation $R = 1 - \prod(1 - S_k)$ + intra-cluster damping $\lambda_{\text{intra}}$. |
-| **THREAT-12.4-02** | Risk Score Suppression | Unsafe model deployed undetected. | Dominance-preserving peak exponent $\alpha_{\text{peak}} \ge 1.0$ guarantees project score reflects worst asset. |
-| **THREAT-12.4-03** | Shared Evidence Double-Counting | Artificially inflated risk from multi-detector reports. | Ancestry collapse groups evidence sharing identical ancestry keys into a single cluster. |
-| **THREAT-12.4-04** | Non-Finite Value Injection (NaN/Inf) | System crash, undefined behavior. | Pydantic validators + explicit checks reject `NaN`/`Inf` fail-closed with `NonFiniteRiskError`. |
-| **THREAT-12.4-05** | Out-of-Range Risk Injection ($R < 0$ or $R > 1$) | Inconsistent policy decisions. | Bounds validation rejects $R \notin [0.0, 1.0]$ with `RiskOutOfRangeError`. |
-| **THREAT-12.4-06** | Cross-Project Tenant Contamination | Data leak or tenant pollution. | Graph builder enforce strict `project_id` matching on every envelope and node. |
-| **THREAT-12.4-07** | Non-Deterministic Ordering Attack | Inconsistent audit trail across runs. | Lexicographical canonical sorting across nodes, edges, assets, and clusters. |
-| **THREAT-12.4-08** | In-Memory Model Mutation | Tampering with in-flight assessment results. | `ConfigDict(frozen=True)` on all Pydantic V2 schemas ensures strict immutability. |
-| **THREAT-12.4-09** | Configuration Substitution Attack | Tampered damping factors change scores silently. | `config_hash` computed via RFC 8785 JCS is bound into the final `hierarchical_hash`. |
-| **THREAT-12.4-10** | Premature Correlation / Proof Leak | Architectural divergence before certification. | Static source audit confirms 0 correlation matrix or proof override logic in `universal.risk`. |
+---
+
+## 1. Threat Vectors and Mitigations
+
+| Threat ID | Threat Description | Attack Vector | Mitigation in Phase 12.4 |
+|---|---|---|---|
+| **T-12.4-01** | Cross-Tenant Evidence Injection | Malicious actor submits evidence with Tenant B project ID into Tenant A session | Strict project boundary assertion; immediate `ProjectBoundaryIngestionError` before normalization |
+| **T-12.4-02** | Payload Tampering & Hash Collision | Adversary alters metrics payload while keeping original hash | Recomputed RFC 8785 JCS SHA-256 validation; raises `SourceHashMismatchIngestionError` |
+| **T-12.4-03** | Ancestry Graph Poisoning / Cycles | Submitting self-referencing or cyclic parent evidence chains | Upstream self-loop rejection + Phase 12.3 DFS 3-color cycle detection |
+| **T-12.4-04** | Resource Exhaustion (DoS) | Submitting massive batches (> 5000 items) or deep trees | Hard ceiling enforcement on batch size, evidence nodes, and DAG depth |
+| **T-12.4-05** | Confidence Manipulation | Forcing detection evidence to confidence > 1.0 or non-finite floats | Pydantic finite float validation + domain adapter bounds checks |
+| **T-12.4-06** | State Mutation via Duplicate Flooding | Flooding identical items to distort finding weight or risk | Canonical hash deduplication; marked `DUPLICATE_SKIPPED` with zero graph side-effects |
+| **T-12.4-07** | Scope Creep / Decision Hijacking | Executing unauthorized risk aggregation or policy decisions | Static AST audit proving zero risk math or policy disposition assignments |
